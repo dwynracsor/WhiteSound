@@ -41,7 +41,8 @@ struct GuiModel {
     std::vector<UiRect> dragExcludes;
 
     // One-shot requests raised by the window buttons; the host consumes them
-    // right after drawing (minimize hides the panel, close exits the app).
+    // right after drawing. Minimize hides the panel; close steps back to the
+    // tray on the first press and exits on the next one (see Shell::requestClose).
     bool requestHide = false;
     bool requestQuit = false;
 
@@ -83,15 +84,19 @@ constexpr float kMaxDb = 0.0f;
 // Volume change applied per mouse-wheel notch while hovering the volume slider.
 constexpr float kWheelDbPerNotch = 2.0f;
 
+// Burst parameter change applied per mouse-wheel notch while hovering a burst
+// slider.
+constexpr float kWheelBurstMsPerNotch = 5.0f;
+
 // Below this level the keep-alive may not provide enough energy to keep a
 // Bluetooth amplifier awake; the UI shows a warning when the user goes lower.
 constexpr float kAdviceMinDb = -60.0f;
 
 // Tooltip wrap position, in multiples of the font size. The flyout is narrow and
 // its render target clips anything drawn outside 320 logical px, so hints must
-// stay narrower than the panel to remain readable (21 * 13 px + padding still
+// stay narrower than the panel to remain readable (17 * 16 px + padding still
 // leaves room inside the window, even at the pointer's far right).
-constexpr float kWrapChars = 21.0f;
+constexpr float kWrapChars = 17.0f;
 
 // Status bulb: the app icon drawn in the header as a little lamp. "Off" is a
 // dark, desaturated LED, "on" is the icon's cyan-to-blue badge with a soft halo.
@@ -99,6 +104,13 @@ constexpr float kBulbSize = 18.0f;          // logical px, square badge
 constexpr float kBulbGap = 6.0f;            // badge -> status text
 constexpr float kBulbRampSeconds = 0.20f;   // off <-> on transition
 constexpr float kBulbBreathPeriod = 2.5f;   // glow pulse while lit
+
+// Flyout panel size (logical px). This is the ImGui window the layout is
+// authored against, and both window hosts (gui_glfw.cpp, gui_win32_dx11.cpp)
+// create their real window at exactly this size so nothing is clipped. The
+// tallest layout (burst mode with the low-level warning) needs ~456 px.
+constexpr int kFlyoutW = 320;
+constexpr int kFlyoutH = 480;
 
 } // namespace gui
 } // namespace ws

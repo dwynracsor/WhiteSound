@@ -216,7 +216,7 @@ bool drawFlyout(GuiModel &m) {
 
     ImGuiViewport *vp = ImGui::GetMainViewport();
     ImGui::SetNextWindowPos(vp->WorkPos);
-    ImGui::SetNextWindowSize(vp->WorkSize);
+    ImGui::SetNextWindowSize(ImVec2(static_cast<float>(kFlyoutW), static_cast<float>(kFlyoutH)));
     // Rounded background: on Windows 11 the OS also rounds the window frame
     // itself; elsewhere this still gives the panel soft corners over the darker
     // clear colour.
@@ -226,7 +226,6 @@ bool drawFlyout(GuiModel &m) {
     const ImGuiWindowFlags flags =
         ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
         ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoCollapse |
-        ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse |
         ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoBringToFrontOnFocus;
 
     ImGui::Begin("##ws_flyout", nullptr, flags);
@@ -250,7 +249,7 @@ bool drawFlyout(GuiModel &m) {
         }
         m.dragExcludes.push_back(UiRect{minPos.x, minPos.y, barBtnW, barBtnH});
 
-        if (titleBarButton("##ws_close", closePos, barBtnW, barBtnH, sc, true, "Close and exit")) {
+        if (titleBarButton("##ws_close", closePos, barBtnW, barBtnH, sc, true, "Close to tray (again to exit)")) {
             m.requestQuit = true;
         }
         m.dragExcludes.push_back(UiRect{closePos.x, closePos.y, barBtnW, barBtnH});
@@ -429,9 +428,27 @@ bool drawFlyout(GuiModel &m) {
         if (ImGui::SliderInt("##burstdur", &m.settings.burstDurationMs, 20, 500, "Length: %d ms")) {
             changed = true;
         }
+        if (ImGui::IsItemHovered()) {
+            const float wheel = ImGui::GetIO().MouseWheel;
+            if (wheel != 0.0f) {
+                m.settings.burstDurationMs += static_cast<int>(wheel * kWheelBurstMsPerNotch);
+                if (m.settings.burstDurationMs < 20) m.settings.burstDurationMs = 20;
+                if (m.settings.burstDurationMs > 500) m.settings.burstDurationMs = 500;
+                changed = true;
+            }
+        }
         ImGui::SetNextItemWidth(contentW);
         if (ImGui::SliderInt("##burstint", &m.settings.burstIntervalMs, 200, 10000, "Every: %d ms")) {
             changed = true;
+        }
+        if (ImGui::IsItemHovered()) {
+            const float wheel = ImGui::GetIO().MouseWheel;
+            if (wheel != 0.0f) {
+                m.settings.burstIntervalMs += static_cast<int>(wheel * kWheelBurstMsPerNotch * 10.0f);
+                if (m.settings.burstIntervalMs < 200) m.settings.burstIntervalMs = 200;
+                if (m.settings.burstIntervalMs > 10000) m.settings.burstIntervalMs = 10000;
+                changed = true;
+            }
         }
     }
 

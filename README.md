@@ -8,6 +8,8 @@ in the system tray, with a native backend on Windows, macOS and Linux.
 
 - **System tray application** (native tray on Windows, macOS and Linux) with a
   compact dark flyout with rounded corners
+- **Two-step close**: closing the panel hides it and leaves the app running in
+  the tray (on Windows it also drops off the taskbar); a second close exits
 - **State at a glance**: the tray icon itself changes — a lit cyan/blue badge with
   the wave while emitting, a dark unlit version while disabled
 - **Dark GUI (flyout)**: volume control, turn on/off, device selector, noise type
@@ -125,7 +127,7 @@ backend and the small platform services are per OS. CMake picks them by OS:
 
 | OS | Tray backend | Notes |
 | --- | --- | --- |
-| Windows | `Shell_NotifyIcon` on a hidden window | also owns the global hotkey |
+| Windows | `Shell_NotifyIcon` on a minimized anchor window (which is also the app's taskbar button) | also owns the global hotkey |
 | macOS | `NSStatusItem` + `NSMenu` | global hotkey via Carbon |
 | Linux | StatusNotifierItem + DBusMenu over the session D-Bus (libdbus) | needs a StatusNotifier host (KDE, or GNOME with an extension) |
 
@@ -219,11 +221,13 @@ host resolve the `IconName` the StatusNotifierItem advertises.
 Run the application (`white_sound_tray.exe` on Windows). It stays in the system
 tray.
 
-- **Left click** on the icon: opens/closes the **dark flyout** (compact ~320×396
-  window with rounded corners)
-  - Window buttons at the top right: **–** minimizes the panel (the app keeps
-    emitting from the tray) and **✕** closes and exits the application (stops
-    emitting)
+- **Left click** on the icon: opens/closes the **dark flyout** (compact, about
+  320 px wide, with rounded corners)
+  - Window buttons at the top right: **–** hides the panel (the app keeps
+    emitting from the tray) and **✕** closes it. The first **✕** only steps back
+    to the tray — the panel hides, the app keeps running and (on Windows) drops
+    off the taskbar; a following **✕**, or **Exit** in the tray menu, exits for
+    good and stops emitting
   - Status lamp (active/inactive) next to the label: the app icon drawn as a
     little bulb that lights up in blue with a soft halo while emitting, and stays
     as a dark unlit LED when disabled. It switches on as the panel opens and
@@ -253,6 +257,11 @@ tray.
 - **Global hotkey Ctrl+Alt+W** (Ctrl+Option+W on macOS): toggles the panel
   without reaching for the tray. On Linux the tray backend does not register a
   global hotkey yet.
+- **Windows taskbar button**: while the app runs it also shows a single
+  "White Sound" button on the taskbar, with its own icon. Clicking it toggles
+  the panel (the panel still auto-hides when it loses focus). Closing the panel
+  removes the button so the app lives only in the tray; reopening the panel from
+  the tray brings it back
 
 Changes made from the flyout are applied live and saved automatically.
 

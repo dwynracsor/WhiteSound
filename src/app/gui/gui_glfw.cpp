@@ -40,8 +40,11 @@ namespace ws {
 namespace gui {
 namespace {
 
-constexpr int kBaseW = 320;
-constexpr int kBaseH = 396;
+// The panel is laid out at gui_ui.h's kFlyoutW x kFlyoutH, so the real window is
+// exactly that size: a shorter window clips the bottom of the layout (the worst
+// case is burst mode with the low-level warning, ~456 logical px tall).
+constexpr int kBaseW = kFlyoutW;
+constexpr int kBaseH = kFlyoutH;
 constexpr int kCornerRadius = 10;
 
 #if defined(_WIN32)
@@ -99,6 +102,9 @@ public:
         glfwWindowHint(GLFW_DECORATED, GLFW_FALSE);
         glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
         glfwWindowHint(GLFW_FLOATING, GLFW_TRUE);
+        // Hidden at startup: the tray's taskbar anchor is the app's permanent
+        // button, and a window that is shown but has not drawn a frame yet
+        // would just sit there as a black rectangle.
         glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
         glfwWindowHint(GLFW_SCALE_TO_MONITOR, GLFW_TRUE);
 
@@ -137,6 +143,17 @@ public:
         ImGuiIO &io = ImGui::GetIO();
         io.IniFilename = nullptr;
         io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+
+        // Usar la fuente del sistema sin añadir ningún .ttf al proyecto:
+        // en Windows carga Segoe UI (la que usa Windows y es similar a la de Apple),
+        // que ya está en C:\Windows\Fonts. En otros SO se usa la fuente por defecto de ImGui.
+#if defined(_WIN32)
+        if (io.Fonts->AddFontFromFileTTF("C:\\Windows\\Fonts\\segoeui.ttf", 16.0f) == nullptr) {
+            io.Fonts->AddFontDefault();
+        }
+#else
+        io.Fonts->AddFontDefault();
+#endif
 
         applyDarkStyle();
         ImGui::GetStyle().ScaleAllSizes(m_scale);
@@ -190,7 +207,6 @@ public:
         }
 
         m_gotActive = false;
-        m_shownTime = glfwGetTime();
         glfwSetWindowPos(m_window, x, y);
         glfwShowWindow(m_window);
 #if defined(_WIN32)
@@ -249,13 +265,16 @@ private:
         auto *self = static_cast<GlfwFlyout *>(glfwGetWindowUserPointer(w));
         if (!self) return;
         if (focused) {
+            // Remember that the panel really held focus; the shell only closes
+            // it on focus loss after that, so a refused activation does not
+            // make it vanish.
             self->m_gotActive = true;
-        } else if (self->m_gotActive &&
-                   (glfwGetTime() - self->m_shownTime) > 0.25) {
-            // Mirror the native host: hide once the panel really held focus, but
-            // ignore a transient deactivation right after showing.
-            self->hide();
         }
+        // Losing focus is deliberately not handled here. The shell waits a
+        // short while (Shell::kFocusLossDelay) before closing the panel, so a
+        // click on the app's own taskbar button reaches the toggle logic while
+        // the panel is still visible. Hiding immediately would race that toggle
+        // and make the panel look like it refuses to close.
     }
     static void onClose(GLFWwindow *w) {
         auto *self = static_cast<GlfwFlyout *>(glfwGetWindowUserPointer(w));
@@ -414,9 +433,18 @@ private:
         HWND hwnd = glfwGetWin32Window(m_window);
         if (!hwnd) return;
         LONG_PTR ex = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
-        ex &= ~WS_EX_APPWINDOW;
+        // The panel is a transient flyout: it must not own a taskbar button of
+        // its own, or every time it is open there would be two "White Sound"
+        // buttons. The tray's anchor window (tray_win32.cpp) is the app's
+        // permanent button, so this one stays a tool window.
         ex |= WS_EX_TOOLWINDOW;
+        ex &= ~WS_EX_APPWINDOW;
         SetWindowLongPtrW(hwnd, GWL_EXSTYLE, ex);
+
+        // Apply the extended-style change so Windows honours it right away
+        // instead of waiting for the next size/move.
+        SetWindowPos(hwnd, nullptr, 0, 0, 0, 0,
+                     SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED);
 
         bool rounded = false;
         HMODULE dwm = LoadLibraryW(L"dwmapi.dll");
@@ -453,7 +481,6 @@ private:
     bool        m_destroyed = false;   // destroy() runs twice (shell + dtor)
     bool        m_visible = false;
     bool        m_gotActive = false;
-    double      m_shownTime = 0.0;
     float       m_scale = 1.0f;
     bool        m_haveUserPos = false;
     int         m_userX = 0;

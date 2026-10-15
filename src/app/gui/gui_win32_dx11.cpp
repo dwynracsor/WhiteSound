@@ -27,8 +27,11 @@ namespace ws {
 namespace gui {
 
 namespace {
-constexpr int kBaseW = 320;
-constexpr int kBaseH = 396;         // fits the title bar + every option (burst)
+// Sized to the panel layout (gui_ui.h): the same layout fills the window, so a
+// shorter window would clip the bottom (burst mode + the low-level warning is
+// the worst case, ~456 logical px tall).
+constexpr int kBaseW = kFlyoutW;
+constexpr int kBaseH = kFlyoutH;
 constexpr int kCornerRadius = 10;   // logical px, scaled by DPI
 
 // DWMWINDOWATTRIBUTE / DWM_WINDOW_CORNER_PREFERENCE values, spelled out so the
@@ -191,7 +194,6 @@ public:
         }
 
         m_gotActive = false;
-        m_shownTick = GetTickCount();
 
         SetWindowPos(m_hwnd, HWND_TOPMOST, x, y, w, h, SWP_SHOWWINDOW | SWP_NOACTIVATE);
         ShowWindow(m_hwnd, SW_SHOW);
@@ -413,11 +415,11 @@ private:
 
             case WM_ACTIVATE:
                 if (LOWORD(wParam) == WA_INACTIVE) {
-                    // Ignore a transient deactivation right after showing; only hide
-                    // once the window actually held focus.
-                    if (m_gotActive && (GetTickCount() - m_shownTick) > 250) {
-                        hide();
-                    }
+                    // Losing focus is not handled here: the shell waits a short
+                    // while (Shell::kFocusLossDelay) before closing the panel, so
+                    // a click on the app's own taskbar button reaches the toggle
+                    // logic while the panel is still visible. Hiding immediately
+                    // would race that toggle.
                 } else {
                     m_gotActive = true;
                 }
@@ -515,7 +517,6 @@ private:
     bool        m_ready = false;
     bool        m_destroyed = false;   // destroy() is called twice (shell + dtor)
     bool        m_gotActive = false;
-    DWORD       m_shownTick = 0;
     float       m_scale = 1.0f;
     bool        m_dwmRounded = false;
     bool        m_haveUserPos = false;   // panel was dragged by the user

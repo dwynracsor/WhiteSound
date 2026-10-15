@@ -33,8 +33,11 @@ using Clock = std::chrono::steady_clock;
 
 // Debounce window for persisting the config after a live change.
 constexpr auto kSaveDelay = std::chrono::milliseconds(500);
-// Wait for the window to really settle before hiding it on focus loss.
-constexpr auto kFocusLossDelay = std::chrono::milliseconds(600);
+// Wait for the window to settle before hiding it on focus loss. This is now
+// the only place that closes the panel on focus loss (the window backends no
+// longer hide it themselves), so it also has to be longer than the time it
+// takes a click on the taskbar button to reach the toggle logic.
+constexpr auto kFocusLossDelay = std::chrono::milliseconds(300);
 
 class Shell : public ws::app::Host {
 public:
@@ -48,6 +51,7 @@ private:
     void showPanel();      // bring the flyout up with a fresh snapshot
     void showConfig() const;
     void showAbout() const;
+    void requestClose();   // the panel's X / the taskbar button's close
     void shutdown();
     void markDirty();
 
@@ -68,6 +72,10 @@ private:
     Clock::time_point m_dirtySince;
     bool m_focusLost = false;
     Clock::time_point m_focusLostSince;
+    // Number of close requests handled since the app started. The first one
+    // only steps back to the tray; the next one exits for good (see
+    // requestClose()).
+    int m_closeCount = 0;
 };
 
 int Shell::run() {
@@ -83,6 +91,7 @@ int Shell::run() {
     callbacks.onCommand = [this](ws::platform::TrayCommand c) { handleCommand(c); };
     callbacks.onActivate = [this] { activate(); };
     callbacks.onHotkey = [this] { togglePanel(); };
+    callbacks.onClose = [this] { requestClose(); };
 
     m_tray = ws::platform::createTray();
     m_trayOk = m_tray && m_tray->create(callbacks);
@@ -108,8 +117,12 @@ int Shell::run() {
             m_controller->syncModel(m_model);
             const bool guiChanged = m_flyout->renderFrame();
             if (m_model.requestQuit) {
-                shutdown();   // the window's close button: leave for good
-                break;
+                // The panel's X button. Same two-step close as the taskbar
+                // button: the first press hides the panel and leaves the app in
+                // the tray, the next one exits.
+                m_model.requestQuit = false;
+                requestClose();
+                if (!m_running) break;
             }
             if (m_model.requestHide) {
                 m_flyout->hide();   // the window's minimize button
@@ -205,7 +218,26 @@ void Shell::showPanel() {
     m_controller->syncModel(m_model);
     ws::gui::refreshDevices(m_model);
     m_model.bulbLit = 0.0f;   // the status lamp visibly switches on
+    // The panel is the app's only real window, so (on Windows) it also brings
+    // back the app's taskbar button while it is open.
+    if (m_trayOk) m_tray->setTaskbarVisible(true);
     m_flyout->showNearCursor();
+}
+
+void Shell::requestClose() {
+    // A close request comes from the panel's X button or from the taskbar
+    // button's own close (see the tray backend). The first one must not exit:
+    // it hides the panel and leaves the app running so the tray icon and the
+    // taskbar button stay. Only a following close really stops the app.
+    if (m_closeCount++ == 0) {
+        if (m_flyout) m_flyout->hide();
+        // Closing steps back to the tray only: drop the app's taskbar button so
+        // it is no longer listed on the taskbar while it keeps running.
+        if (m_trayOk) m_tray->setTaskbarVisible(false);
+        m_focusLost = false;
+        return;
+    }
+    shutdown();
 }
 
 void Shell::shutdown() {

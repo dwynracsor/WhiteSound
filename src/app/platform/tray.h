@@ -26,6 +26,10 @@ struct TrayCallbacks {
     std::function<void()> onActivate;
     // The global toggle hotkey (Ctrl+Alt+W) was pressed.
     std::function<void()> onHotkey;
+    // The user asked the running app to close through some window other than
+    // the panel (on Windows, the taskbar button's "Close window"). The shell
+    // decides whether that steps back to the tray or really exits.
+    std::function<void()> onClose;
 };
 
 // Native system-tray icon, one implementation per OS:
@@ -55,6 +59,12 @@ public:
 
     // Reflects the enabled state in the icon, the tooltip and the menu check.
     virtual void setEnabled(bool enabled) = 0;
+
+    // Windows only: show or hide the app's own taskbar button (the anchor
+    // window). Closing the panel hides it so the app drops off the taskbar and
+    // lives only in the tray; opening the panel brings it back. A no-op on
+    // platforms that do not put the app on the taskbar.
+    virtual void setTaskbarVisible(bool visible) { (void)visible; }
 
     // Pops the context menu at the current pointer. Used by the shell's
     // tray-only fallback (no flyout). A no-op where the desktop shows the menu
