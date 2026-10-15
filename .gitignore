@@ -1,0 +1,47 @@
+# Build directories
+build/
+build-*/
+out/
+cmake-build-*/
+
+# CMake (generated files only; third_party/*.cmake are real sources and must
+# not be ignored -- GLFW's CMake/GenerateMappings.cmake is needed on Windows)
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+Testing/
+
+# Compiled objects and binaries
+*.o
+*.obj
+*.exe
+*.a
+*.lib
+*.dll
+*.so
+*.dylib
+
+# Distribution packages
+dist/
+*.zip
+*.7z
+*.msi
+*-setup.exe
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Debug/output artifacts
+out.txt
+err.txt
+*.log

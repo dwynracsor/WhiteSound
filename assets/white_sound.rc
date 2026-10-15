@@ -1,0 +1,71 @@
+// Windows resources: application icons, version metadata and the application
+// manifest.
+//
+// Compiled into white_sound_tray.exe so Windows can show the icon in Explorer,
+// in the file properties dialog and in the tray, report the version in the
+// Details tab, and apply the DPI/execution-level settings from the manifest.
+//
+// The icon IDs must stay in sync with ws::icon::kId / ws::icon::kIdOff in
+// src/app/icon/app_icon.h.
+//
+// Two icons: the lit badge (active) and the "off" badge (inactive), so the tray
+// shows the state at a glance. windres/rc resolve the .ico and .manifest files
+// through the include directories, so assets/ and the generated/ folder (which
+// holds ws_version.h and white_sound.manifest) are added to the target's include
+// path in CMakeLists.txt.
+
+#include "ws_version.h"
+
+#define IDI_APP_ICON     101
+#define IDI_APP_ICON_OFF 102
+
+IDI_APP_ICON     ICON "white_sound.ico"
+IDI_APP_ICON_OFF ICON "white_sound_off.ico"
+
+// Application manifest (RT_MANIFEST = 24, CREATEPROCESS_MANIFEST_RESOURCE_ID = 1).
+//
+// Only embedded for toolchains that do not add a manifest of their own, e.g.
+// MSVC. MinGW-w64 links its own default-manifest.o (asInvoker + supportedOS),
+// and embedding a second one makes ld fail with "multiple non-default
+// manifests"; the DPI awareness is set from the code (see enableDpiAwareness in
+// tray_app.cpp), so the MinGW build behaves the same.
+#ifdef WS_EMBED_MANIFEST
+1 24 "white_sound.manifest"
+#endif
+
+// Version metadata (RT_VERSION). Must be resource id 1 (the classic
+// VS_VERSION_INFO); GNU windres would otherwise store it under the literal
+// string name "VS_VERSION_INFO", which Windows does not recognise as file
+// version info.
+1 VERSIONINFO
+ FILEVERSION    WS_VERSION_COMMA
+ PRODUCTVERSION WS_VERSION_COMMA
+ FILEFLAGSMASK  0x3fL
+#ifdef _DEBUG
+ FILEFLAGS      0x1L
+#else
+ FILEFLAGS      0x0L
+#endif
+ FILEOS         0x40004L
+ FILETYPE       0x1L
+ FILESUBTYPE    0x0L
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904b0"
+        BEGIN
+            VALUE "CompanyName",      WS_PRODUCT_NAME
+            VALUE "FileDescription",  WS_FILE_DESCRIPTION
+            VALUE "FileVersion",      WS_VERSION_STRING
+            VALUE "InternalName",     WS_ORIGINAL_FILENAME
+            VALUE "LegalCopyright",   WS_COPYRIGHT
+            VALUE "OriginalFilename", WS_ORIGINAL_FILENAME
+            VALUE "ProductName",      WS_PRODUCT_NAME
+            VALUE "ProductVersion",   WS_VERSION_STRING
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x409, 1200
+    END
+END
