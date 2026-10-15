@@ -621,9 +621,30 @@ float autoTuneNextLevel(float level, float base, float max,
     return level;
 }
 
+// Inverse volume factor: controls how strongly the auto-tune responds to
+// volume changes. 1.0 = full inverse relationship, 0.0 = no effect.
+static constexpr float kInverseVolumeFactor = 0.7f;
+
+// Convert amplitude to dBFS (clamped to valid range)
+inline float amplitudeToDb(float amplitude) {
+    if (amplitude <= 0.0f) return -80.0f;
+    float db = 20.0f * std::log10(amplitude);
+    if (db < -80.0f) db = -80.0f;
+    if (db > 0.0f) db = 0.0f;
+    return db;
+}
+
+// Convert dBFS to amplitude
+inline float dbToAmplitude(float db) {
+    if (db <= -80.0f) return 0.0f;
+    return std::pow(10.0f, db / 20.0f);
+}
+
 // Auto-tune control loop (runs on the watchdog thread ~1/s). AIMD: on each
 // detected dropout the level is multiplied up to maxLevel; after a long stable
 // window it decays back toward the user baseline to keep the hiss minimal.
+// Additionally, the level is inversely adjusted based on the current volume
+// so that when output volume is high, noise is minimized, and vice versa.
 void KeepAlive::autoTuneStep() {
     if (!m_impl) return;
     std::lock_guard<std::mutex> lk(m_impl->opMtx);
@@ -651,17 +672,45 @@ void KeepAlive::autoTuneStep() {
 
     if (n > 0) m_impl->lastDropoutTime = now;
 
+    // Standard auto-tune step based on drop-outs
     const float next = autoTuneNextLevel(cur, floorL, maxL, n, stable, kStableSecs);
-    if (n > 0 && next > floorL) {
-        m_impl->floorLevel.store(next, std::memory_order_relaxed);
+
+    // --- Inverse volume adjustment ---
+    // When the noise level setting is high (closer to 0 dBFS), the inverse
+    // target is low (more quiet). When the noise level setting is low, the
+    // inverse target allows a slightly higher noise floor.
+    // Formula: inverseTargetDb = -40 - currentDb, clamped to [-80, 0] range.
+    float curDb = amplitudeToDb(cur);
+    // Target: when output is at 0 dBFS, noise should be at -40 dBFS max.
+    // When output is at -80 dBFS, noise can be at -80 dBFS (floor).
+    // We use a factor so it's not extremely aggressive.
+    float inverseTargetDb = -40.0f - curDb;
+    // Scale factor: 0.5 means half the inverse, 1.0 means full inverse
+    inverseTargetDb *= kInverseVolumeFactor;
+    // Clamp to valid dBFS range
+    if (inverseTargetDb < -80.0f) inverseTargetDb = -80.0f;
+    if (inverseTargetDb > 0.0f) inverseTargetDb = 0.0f;
+    float inverseTarget = dbToAmplitude(inverseTargetDb);
+
+    // The final level is the standard auto-tune next, but never above the
+    // inverse volume target (so noise never gets too loud when volume is high)
+    float finalNext = next;
+    if (inverseTarget < finalNext) {
+        finalNext = inverseTarget;
     }
-    if (std::fabs(next - cur) > 1e-4f) {
-        m_level.store(next, std::memory_order_relaxed);
+
+    if (n > 0 && finalNext > floorL) {
+        m_impl->floorLevel.store(finalNext, std::memory_order_relaxed);
+    }
+    if (std::fabs(finalNext - cur) > 1e-4f) {
+        m_level.store(finalNext, std::memory_order_relaxed);
         std::ostringstream ss;
         if (n > 0) {
-            ss << "autotune: " << n << " drop-out(s) -> level " << cur << " -> " << next;
+            ss << "autotune: " << n << " drop-out(s) -> level " << cur << " -> " << finalNext
+               << " (invtarget=" << inverseTargetDb << "dBFS)";
         } else {
-            ss << "autotune: stable -> level " << cur << " -> " << next;
+            ss << "autotune: stable -> level " << cur << " -> " << finalNext
+               << " (invtarget=" << inverseTargetDb << "dBFS)";
         }
         ws_diag_log(ss.str());
     }
