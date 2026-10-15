@@ -34,12 +34,22 @@ in the system tray, with a native backend on Windows, macOS and Linux.
 ## Requirements
 
 - CMake >= 3.20
-- Ninja (recommended) or MinGW Makefiles
-- MinGW-w64 (g++) on Windows, Xcode/clang on macOS, GCC/clang on Linux
-- Linux only: the D-Bus development headers for the tray (`libdbus-1-dev` on
-  Debian/Ubuntu, `dbus-devel` on Fedora) and at least one audio backend's
-  development headers (`libasound2-dev` for ALSA, `libpulse-dev` for PulseAudio
-  or `libjack-dev` for JACK). CMake compiles only the backends it finds.
+- Ninja (recommended) or MinGW Makefiles / Make
+- MinGW-w64 (g++) on Windows, Xcode command line tools (clang) on macOS, GCC >= 9
+  or clang on Linux (a C++17 `<filesystem>` is required)
+- macOS: nothing beyond the Xcode command line tools; Cocoa, Carbon and OpenGL
+  come from the system SDK
+- Linux only:
+  - the X11/Wayland and OpenGL headers the vendored GLFW is built against. On
+    Debian/Ubuntu: `sudo apt install xorg-dev libwayland-dev libxkbcommon-dev
+    libgl1-mesa-dev` (the `xorg-dev` metapackage pulls in every X11 header GLFW
+    needs); on Fedora the `-devel` equivalents plus `pkgconf`. If Wayland is
+    unavailable, configure with `-DGLFW_BUILD_WAYLAND=OFF`.
+  - the D-Bus development headers for the tray (`libdbus-1-dev` on
+    Debian/Ubuntu, `dbus-devel` on Fedora)
+  - at least one audio backend's development headers (`libasound2-dev` for ALSA,
+    `libpulse-dev` for PulseAudio or `libjack-dev` for JACK). CMake compiles only
+    the backends it finds.
 - [Inno Setup 6](https://jrsoftware.org/isinfo.php) — only to build the Windows
   installer (`winget install JRSoftware.InnoSetup`)
 
@@ -77,6 +87,31 @@ the top of `CMakeLists.txt`. CMake expands `src/app/version.h.in` into
 manifest, so the About dialog, the executable's file properties and the app
 manifest all report the same version from that single place.
 
+### Verifying on macOS/Linux
+
+The Windows build is exercised on every change; the macOS and Linux backends
+share the same portable shell but still need a first run on their own system.
+`tools/verify_unix.sh` does the configure + build + unit-test pass in one step:
+
+```sh
+sh tools/verify_unix.sh
+```
+
+Then launch the built binary and check, in order:
+
+1. The **tray icon** appears (Linux needs a StatusNotifier host: KDE, or GNOME
+   with the AppIndicator extension).
+2. The **panel** opens on a left click, draws with rounded corners and closes on
+   `Esc` or when it loses focus.
+3. The **audio** starts (Turn on) and the header shows the opened device and
+   sample rate; the log in the config directory records `opened ...`.
+4. On macOS, **Ctrl+Option+W** toggles the panel and `About` reports
+   `Global hotkey: active`.
+
+Anything that fails is worth reporting with the exact tool output; the per-OS
+code is small and lives behind `ws::platform::Tray` and
+`ws::platform::showMessage()`.
+
 ## Platforms
 
 The shell (`src/app/shell`) and everything below it are portable; only the tray
@@ -96,9 +131,12 @@ The single-instance guard and the message-box helper live in `src/app/platform`
 and are per OS too (a named mutex on Windows, a `flock` lock file on
 macOS/Linux).
 
-> **Status:** only the Windows backend is tested. The macOS and Linux backends
-> drive the same portable shell but have not been built or run on those systems
-> yet, so treat them as a starting point rather than a finished port.
+> **Status:** the Windows backend is the one that has been built and run so far.
+> The macOS and Linux backends drive the same portable shell but have not been
+> built or run on those systems yet, so treat them as a starting point rather
+> than a finished port. See
+> [Verifying on macOS/Linux](#verifying-on-macoslinux) for the one-command
+> check.
 
 ## Installer
 

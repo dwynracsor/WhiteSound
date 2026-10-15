@@ -1,6 +1,15 @@
 cmake_minimum_required(VERSION 3.20)
 project(white_sound VERSION 1.0.0 LANGUAGES CXX)
 
+# Objective-C++ is required for the macOS tray (NSStatusItem) and the macOS
+# platform services, which are .mm sources. Without this, no enabled language
+# claims the .mm extension, so CMake quietly leaves those files out of the build
+# and createTray()/acquireSingleInstance()/showMessage() end up undefined at link
+# time. Only macOS uses Objective-C++.
+if(APPLE)
+    enable_language(OBJCXX)
+endif()
+
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -273,11 +282,17 @@ else()
     # Linux tray: StatusNotifierItem over D-Bus, via libdbus.
     find_package(PkgConfig QUIET)
     if(PKG_CONFIG_FOUND)
-        pkg_check_modules(DBUS REQUIRED dbus-1)
+        pkg_check_modules(DBUS dbus-1)
+    endif()
+    if(DBUS_FOUND)
         target_include_directories(white_sound_tray PRIVATE ${DBUS_INCLUDE_DIRS})
         target_link_libraries(white_sound_tray PRIVATE ${DBUS_LIBRARIES})
     else()
+        # No pkg-config (or no dbus-1.pc): locate the header and the library
+        # ourselves, so dbus/dbus.h is on the include path either way.
+        find_path(DBUS_INCLUDE_DIR NAMES dbus/dbus.h REQUIRED)
         find_library(DBUS_LIBRARY NAMES dbus-1 REQUIRED)
+        target_include_directories(white_sound_tray PRIVATE ${DBUS_INCLUDE_DIR})
         target_link_libraries(white_sound_tray PRIVATE ${DBUS_LIBRARY})
     endif()
 endif()

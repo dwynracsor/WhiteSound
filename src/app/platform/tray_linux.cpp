@@ -617,12 +617,10 @@ void LinuxTray::dispatchCommand(int id) {
         case kIdQuit:   m_cb.onCommand(TrayCommand::Quit); break;
         default: return;
     }
-    if (id == kIdEnable) {
-        // Toggling changed the checkmark; tell the host to re-read the layout.
-        m_enabled = !m_enabled;
-        m_revision++;
-        emitLayoutUpdated();
-    }
+    // No local state change here. ToggleEnabled has the shell flip the
+    // controller, which calls back into setEnabled() (exactly like the Windows
+    // and macOS backends); toggling m_enabled again would invert the checkmark
+    // and the icon.
 }
 
 // ---- StatusNotifierItem messages ------------------------------------------

@@ -282,7 +282,13 @@ private:
         }
         if (mw > 0 && mh > 0) {
             x = mx + mw - 24;
+#if defined(__APPLE__)
+            // The status item sits in the menu bar, along the top edge.
+            y = my + 24;
+#else
+            // Most Linux trays sit along the bottom edge.
             y = my + mh - 24;
+#endif
             return;
         }
         x = 0;

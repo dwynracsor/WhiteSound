@@ -1,0 +1,3 @@
+# Shell scripts must keep LF endings even on Windows checkouts, otherwise the
+# carriage returns break `sh tools/verify_unix.sh` on macOS/Linux (and in WSL).
+*.sh text eol=lf
