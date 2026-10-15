@@ -28,6 +28,10 @@ dist/
 *.7z
 *.msi
 *-setup.exe
+*.dmg
+*.tar.gz
+*.deb
+*.rpm
 
 # IDE
 .vscode/

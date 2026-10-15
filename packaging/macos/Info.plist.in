@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Bundle Info.plist for White Sound.app, stamped with the version by
+  packaging/macos/build_app.sh (from project(... VERSION ...) in CMakeLists.txt).
+-->
+<plist version="1.0">
+<dict>
+    <key>CFBundleDevelopmentRegion</key>
+    <string>en</string>
+    <key>CFBundleExecutable</key>
+    <string>white_sound_tray</string>
+    <key>CFBundleIdentifier</key>
+    <string>org.whitesound.whitesound</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>CFBundleName</key>
+    <string>White Sound</string>
+    <key>CFBundleDisplayName</key>
+    <string>White Sound</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleShortVersionString</key>
+    <string>@WS_VERSION@</string>
+    <key>CFBundleVersion</key>
+    <string>@WS_VERSION@</string>
+    <key>CFBundleIconFile</key>
+    <string>white_sound</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>11.0</string>
+    <!-- Tray-only app: no Dock icon and no app menu, like the Accessory
+         activation policy the tray sets at startup. -->
+    <key>LSUIElement</key>
+    <true/>
+    <key>NSHighResolutionCapable</key>
+    <true/>
+    <key>LSApplicationCategoryType</key>
+    <string>public.app-category.utilities</string>
+    <key>NSHumanReadableCopyright</key>
+    <string>MIT licensed</string>
+</dict>
+</plist>

@@ -112,6 +112,12 @@ Anything that fails is worth reporting with the exact tool output; the per-OS
 code is small and lives behind `ws::platform::Tray` and
 `ws::platform::showMessage()`.
 
+The packaging scripts ([Packaging](#packaging)) give something concrete to
+install and launch on those systems: `packaging/linux/build_tarball.sh` builds a
+tarball whose `install.sh` places the binary, desktop entry and icons, and
+`packaging/macos/build_app.sh` builds `White Sound.app` and a `.dmg`. Installing
+the package and repeating the checks above is the real end-to-end test.
+
 ## Platforms
 
 The shell (`src/app/shell`) and everything below it are portable; only the tray
@@ -138,9 +144,12 @@ macOS/Linux).
 > [Verifying on macOS/Linux](#verifying-on-macoslinux) for the one-command
 > check.
 
-## Installer
+## Packaging
 
-Windows only. Inno Setup packages the built executable into a per-user installer:
+Each OS gets a self-contained package; none of them are code-signed, so Windows
+SmartScreen and macOS Gatekeeper will warn on first run.
+
+### Windows (Inno Setup)
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File installer\build_installer.ps1
@@ -158,6 +167,52 @@ uninstaller that removes those shortcuts and the autostart entry. Your settings
 in `%APPDATA%\white-sound` are left untouched (delete that folder to reset).
 
 The installer reads its version from the build, so it always matches the app.
+
+To check the installer end to end, there is a script that installs silently,
+verifies the files, shortcuts, registry entries and version, launches the
+installed app and confirms its tray window appears, then uninstalls and verifies
+that everything is gone:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File installer\test_install.ps1
+```
+
+It is safe to run on a development machine (it removes a previous install
+first), but it is meant for a clean Windows machine or VM. It exits non-zero if
+any check fails.
+
+### macOS (`.app` + `.dmg`)
+
+```sh
+sh packaging/macos/build_app.sh
+```
+
+Builds the app and assembles `dist/White Sound.app` (executable in
+`Contents/MacOS`, the tray PNGs and a generated `.icns` in `Contents/Resources`,
+plus an `Info.plist` with `LSUIElement` so it is a tray-only agent) and a
+`dist/White Sound-<version>.dmg` with an `/Applications` shortcut for
+drag-to-install. The bundle is only ad-hoc signed, so the first launch needs a
+**right-click → Open**.
+
+### Linux (portable tarball)
+
+```sh
+sh packaging/linux/build_tarball.sh
+```
+
+Builds the app and produces `dist/white-sound-<version>-linux-<arch>.tar.gz`
+containing `bin/`, `share/` (a `.desktop` entry and the hicolor theme icons) and
+an `install.sh`. To install:
+
+```sh
+tar xzf white-sound-<version>-linux-<arch>.tar.gz
+sh white-sound-<version>-linux-<arch>/install.sh          # into ~/.local
+sh white-sound-<version>-linux-<arch>/install.sh --system # into /usr/local
+```
+
+`install.sh` also takes `--autostart` (writes an `~/.config/autostart` entry) and
+`--uninstall`. Installing the icon into the theme is what lets the desktop's tray
+host resolve the `IconName` the StatusNotifierItem advertises.
 
 ## Usage
 

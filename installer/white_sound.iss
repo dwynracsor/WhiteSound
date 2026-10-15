@@ -23,8 +23,10 @@
 
 [Setup]
 ; A stable AppId keeps upgrades and the uninstall entry tied to one product.
-; Do not change it between releases.
-AppId={{3870C687-7128-4828-92A6-72B455777F54}}
+; Do not change it between releases. The doubled "{" is Inno's escape for a
+; literal "{", so this produces the AppId "{3870C687-...-72B455777F54}" (writing
+; "{{...}}" would keep an extra closing brace in the uninstall key).
+AppId={{3870C687-7128-4828-92A6-72B455777F54}
 AppName={#MyAppName}
 AppVersion={#WS_VERSION}
 AppVerName={#MyAppName} {#WS_VERSION}
