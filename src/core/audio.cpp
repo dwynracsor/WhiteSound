@@ -1,4 +1,3 @@
-// Define miniaudio implementation ONCE in this translation unit
 #define MINIAUDIO_IMPLEMENTATION
 #include "../../third_party/miniaudio/miniaudio.h"
 
@@ -36,15 +35,7 @@ inline void ws_set_verbose(bool v) {
 
 namespace ws {
 
-// Lightweight diagnostic log to ws.log in the per-user config directory
-// (see core/paths.h), best-effort and never throwing. Used to confirm which
-// endpoint the keep-alive stream opens on and to trace restarts when chasing
-// Bluetooth drop-outs.
 static void ws_diag_log(const std::string &msg) {
-    // Serialize writers: the notification callback (audio thread), the watchdog
-    // and the main thread all log here. Concurrent std::ofstream appends to the
-    // same file corrupt each other's lines, and can also make the rotation
-    // below fail. One mutex keeps every line whole.
     static std::mutex s_logMtx;
     std::lock_guard<std::mutex> lock(s_logMtx);
     try {
@@ -70,7 +61,7 @@ static void ws_diag_log(const std::string &msg) {
             out << "[" << stamp << "] " << msg << "\n";
         }
     } catch (...) {
-        /* diagnostics must never break audio */
+
     }
 }
 
@@ -79,32 +70,29 @@ struct KeepAlive::Impl {
     ma_device  device;
     bool       initialized;
     std::atomic<bool> running;
-    std::atomic<float> *pLevel; // points to owner m_level
+    std::atomic<float> *pLevel;
 
-    KeepAlive *owner = nullptr;          // back-pointer for the watchdog
-    Settings   settings;                 // last requested settings (for auto-restart)
-    std::atomic<bool> wantRunning{false};// the stream should be running
-    std::atomic<bool> needRestart{false};// a notification asked for a restart
+    KeepAlive *owner = nullptr;
+    Settings   settings;
+    std::atomic<bool> wantRunning{false};
+    std::atomic<bool> needRestart{false};
     std::atomic<bool> stopWatchdog{false};
-    std::atomic<bool> selfStop{false};   // we are stopping the device on purpose
-    std::atomic<bool> autoRouting{false};// opened on default device (miniaudio may reroute)
-    std::mutex        opMtx;             // serializes device init/start/stop
+    std::atomic<bool> selfStop{false};
+    std::atomic<bool> autoRouting{false};
+    std::mutex        opMtx;
     std::thread       watchdog;
 
-    // Auto-tuner state. dropouts counts stream teardowns (stopped/unlocked/
-    // interruption) since the last control step; guarded by opMtx otherwise.
     std::atomic<bool>          autoTune{true};
-    std::atomic<float>         baseLevel{0.002f};  // user-requested baseline
-    std::atomic<float>         maxLevel{0.02f};    // ceiling for the tuner
-    std::atomic<float>         floorLevel{0.002f}; // learned floor (>= baseLevel)
-    std::atomic<int>           noiseMode{0};       // 0 = white, 1 = pink, 2 = burst
+    std::atomic<float>         baseLevel{0.002f};
+    std::atomic<float>         maxLevel{0.02f};
+    std::atomic<float>         floorLevel{0.002f};
+    std::atomic<int>           noiseMode{0};
     std::atomic<int>           burstDurationMs{200};
     std::atomic<int>           burstIntervalMs{2000};
     std::atomic<std::uint64_t> burstSampleCounter{0};
     std::atomic<std::uint32_t> dropouts{0};
     std::chrono::steady_clock::time_point lastDropoutTime = std::chrono::steady_clock::now();
 
-    // Diagnostics (guarded by opMtx)
     std::string actualDeviceName;
     int         actualSampleRate   = 0;
     int         actualPeriodFrames = 0;
@@ -137,14 +125,12 @@ struct KeepAlive::Impl {
         running     = false;
     }
 
-    // Polls the device and restarts it if Windows tore the stream down (e.g. the
-    // Bluetooth endpoint was reconfigured when another app grabbed audio).
     void startWatchdog() {
         if (watchdog.joinable()) return;
         watchdog = std::thread([this]() {
             int beat = 0;
             while (!stopWatchdog.load()) {
-                for (int i = 0; i < 20; ++i) { // ~1s, waking early if signalled
+                for (int i = 0; i < 20; ++i) {
                     if (stopWatchdog.load() || needRestart.load()) break;
                     std::this_thread::sleep_for(std::chrono::milliseconds(50));
                 }
@@ -153,8 +139,6 @@ struct KeepAlive::Impl {
                     owner->verifyAndRestart();
                     owner->autoTuneStep();
                 }
-                // Periodic heartbeat so the timeline in ws.log shows the level
-                // that was actually in use when the endpoint cut out.
                 if (++beat >= 30 && wantRunning.load(std::memory_order_relaxed) && pLevel) {
                     beat = 0;
                     std::ostringstream ss;
@@ -173,7 +157,6 @@ struct KeepAlive::Impl {
     }
 };
 
-// Xorshift32 for cheap uniform -> white
 static inline std::uint32_t xorshift32(std::uint32_t &x) {
     x ^= x << 13;
     x ^= x >> 17;
@@ -181,8 +164,6 @@ static inline std::uint32_t xorshift32(std::uint32_t &x) {
     return x;
 }
 
-// Pure core of the burst generator: emit noise for the first `burstDurationMs`
-// of every `burstIntervalMs` window, silence otherwise.
 bool burstActiveAt(std::uint64_t sampleCounter, int sampleRate,
                    int burstDurationMs, int burstIntervalMs) {
     if (burstIntervalMs <= 0 || sampleRate <= 0) return true;
@@ -196,7 +177,6 @@ bool burstActiveAt(std::uint64_t sampleCounter, int sampleRate,
     return pos < durSamples;
 }
 
-// Pink noise generator (Paul Kellett's approximation) state
 struct PinkState {
     float b0 = 0.0f, b1 = 0.0f, b2 = 0.0f, b3 = 0.0f, b4 = 0.0f, b5 = 0.0f, b6 = 0.0f;
 };
@@ -226,7 +206,6 @@ void KeepAlive::CallbackAccess::get_level(void *pDeviceVoid, float *outLevel) {
     *outLevel = level;
 }
 
-// Read the selected noise generator (0 = white, 1 = pink) from the device.
 void KeepAlive::CallbackAccess::get_noise_mode(void *pDeviceVoid, int *outMode) {
     if (!pDeviceVoid || !outMode) return;
     auto *pDevice = static_cast<ma_device *>(pDeviceVoid);
@@ -250,9 +229,6 @@ bool KeepAlive::CallbackAccess::next_burst_emit(void *pDeviceVoid, unsigned samp
     return burstActiveAt(cnt, static_cast<int>(sampleRate), dur, itv);
 }
 
-// miniaudio notification handler: Windows tells us when the endpoint was
-// rerouted, unlocked, or the stream was stopped. Flag a restart so the
-// watchdog brings the white noise back (covers browser grabbing the device).
 void KeepAlive::CallbackAccess::on_notification(void *pNotificationVoid) {
     if (!pNotificationVoid) return;
     auto *pNotification = static_cast<const ma_device_notification *>(pNotificationVoid);
@@ -260,7 +236,6 @@ void KeepAlive::CallbackAccess::on_notification(void *pNotificationVoid) {
     auto *impl = static_cast<KeepAlive::Impl *>(pNotification->pDevice->pUserData);
     if (!impl) return;
 
-    // A notification raised by our own stop/uninit is not an external dropout.
     if (impl->selfStop.load(std::memory_order_relaxed)) {
         return;
     }
@@ -284,8 +259,6 @@ void KeepAlive::CallbackAccess::on_notification(void *pNotificationVoid) {
             impl->needRestart.store(true, std::memory_order_relaxed);
             break;
         case ma_device_notification_type_rerouted:
-            // When miniaudio owns auto-routing (default device) it already
-            // rebuilt the stream; restarting again here would add a click.
             if (!impl->autoRouting.load(std::memory_order_relaxed)) {
                 ws_diag_log("notification: rerouted -> restart");
                 impl->needRestart.store(true, std::memory_order_relaxed);
@@ -299,19 +272,16 @@ void KeepAlive::CallbackAccess::on_notification(void *pNotificationVoid) {
     }
 }
 
-// Free-function trampoline with the signature miniaudio expects.
 static void ws_notification_callback(const ma_device_notification *pNotification) {
     KeepAlive::CallbackAccess::on_notification(
         const_cast<ma_device_notification *>(pNotification));
 }
 
-// Data callback: generate white (default) or pink noise scaled by level
 static void data_callback(ma_device *pDevice, void *pOutput, const void * /*pInput*/, ma_uint32 frameCount) {
     if (!pDevice || !pOutput || frameCount == 0) return;
 
     float level = 0.002f;
     KeepAlive::CallbackAccess::get_level(pDevice, &level);
-    // Clamp
     if (level < 0.0f) level = 0.0f;
     if (level > 1.0f) level = 1.0f;
 
@@ -321,13 +291,12 @@ static void data_callback(ma_device *pDevice, void *pOutput, const void * /*pInp
     ma_uint32 channels = pDevice->playback.channels;
     if (channels == 0) channels = 2;
 
-    // xorshift state per call is fine; use thread_local
     static thread_local std::uint32_t rng = static_cast<std::uint32_t>(
         std::chrono::steady_clock::now().time_since_epoch().count() ^ std::random_device{}());
     static thread_local PinkState pinkState;
 
     float *out = static_cast<float *>(pOutput);
-    const float invMax = 2.0f / 4294967295.0f; // scale [0, UINT32_MAX] to [-1,1)
+    const float invMax = 2.0f / 4294967295.0f;
 
     const ma_uint32 sampleRate = pDevice->sampleRate > 0 ? pDevice->sampleRate : 44100;
 
@@ -370,10 +339,8 @@ static ma_bool32 enum_playback(ma_context * /*pContext*/, ma_device_type deviceT
     if (deviceType != ma_device_type_playback) return MA_TRUE;
     auto *list = static_cast<std::vector<OutputDevice> *>(pUserData);
     OutputDevice d;
-    // index is position in list
     d.index      = static_cast<int>(list->size());
     d.name       = pInfo->name;
-    // hostapi is filled in by listOutputs() once the backend is known.
     d.is_default = pInfo->isDefault ? true : false;
     list->push_back(std::move(d));
     return MA_TRUE;
@@ -384,7 +351,6 @@ std::vector<OutputDevice> KeepAlive::listOutputs() {
     if (!m_impl) return list;
     std::lock_guard<std::mutex> lk(m_impl->opMtx);
 
-    // Ensure context initialized
     if (!m_impl->initialized) {
         ma_result r = ma_context_init(NULL, 0, NULL, &m_impl->context);
         if (r != MA_SUCCESS) {
@@ -400,7 +366,6 @@ std::vector<OutputDevice> KeepAlive::listOutputs() {
         return list;
     }
 
-    // set hostapi from backend name
     const char *backend = ma_get_backend_name(m_impl->context.backend);
     if (!backend) backend = "WASAPI";
     for (auto &d : list) {
@@ -410,9 +375,6 @@ std::vector<OutputDevice> KeepAlive::listOutputs() {
 }
 
 bool KeepAlive::start(const Settings &s) {
-    // Pass the settings through untouched: deviceIndex < 0 means "system
-    // default" and is opened with pDeviceID = NULL so miniaudio/WASAPI can
-    // follow the default endpoint (e.g. a Bluetooth speaker) automatically.
     return configure(s);
 }
 
@@ -420,9 +382,6 @@ bool KeepAlive::configure(const Settings &s) {
     if (!m_impl) return false;
     std::lock_guard<std::mutex> lk(m_impl->opMtx);
     m_impl->wantRunning.store(true, std::memory_order_relaxed);
-    // Apply the user-requested baseline and (re)seed the auto-tuner. Internal
-    // restarts (verifyAndRestart) call configureImpl() directly and must keep
-    // the level the tuner has climbed to, so that seeding lives here only.
     const float startLevel = s.level >= 0.0f ? s.level : 0.002f;
     m_level.store(startLevel, std::memory_order_relaxed);
     m_impl->baseLevel.store(startLevel, std::memory_order_relaxed);
@@ -440,13 +399,11 @@ bool KeepAlive::configure(const Settings &s) {
     return configureImpl(s);
 }
 
-// Must be called with m_impl->opMtx held (configure() and verifyAndRestart()).
 bool KeepAlive::configureImpl(const Settings &s) {
     if (!m_impl) return false;
     m_impl->settings = s;
     m_impl->needRestart.store(false, std::memory_order_relaxed);
 
-    // Ensure context
     if (!m_impl->initialized) {
         ma_result r = ma_context_init(NULL, 0, NULL, &m_impl->context);
         if (r != MA_SUCCESS) {
@@ -456,7 +413,6 @@ bool KeepAlive::configureImpl(const Settings &s) {
         m_impl->initialized = true;
     }
 
-    // Get devices
     ma_device_info *pPlayback = nullptr;
     ma_uint32 playbackCount   = 0;
     ma_device_info *pCapture  = nullptr;
@@ -469,9 +425,6 @@ bool KeepAlive::configureImpl(const Settings &s) {
     WS_LOG_DEBUG("got devices: playback=%u, capture=%u, pPlayback=%p, pCapture=%p",
                  playbackCount, captureCount, (void*)pPlayback, (void*)pCapture);
 
-    // Choose device id. When no explicit index is requested we leave the id NULL
-    // so miniaudio follows the *default* device and enables WASAPI auto stream
-    // routing (it can re-route to the new default endpoint on its own).
     const ma_device_id *pChosen = nullptr;
     if (s.deviceIndex >= 0 && s.deviceIndex < static_cast<int>(playbackCount)) {
         pChosen = &pPlayback[s.deviceIndex].id;
@@ -485,7 +438,6 @@ bool KeepAlive::configureImpl(const Settings &s) {
         ws_diag_log(ss.str());
     }
 
-    // If running and device different? But easier: stop first if running
     if (m_impl->running.load()) {
         m_impl->selfStop.store(true, std::memory_order_relaxed);
         ma_device_stop(&m_impl->device);
@@ -495,13 +447,10 @@ bool KeepAlive::configureImpl(const Settings &s) {
         m_impl->running.store(false);
     }
 
-    // Config
     ma_device_config cfg = ma_device_config_init(ma_device_type_playback);
     cfg.playback.pDeviceID = pChosen;
     cfg.playback.format    = ma_format_f32;
     cfg.playback.channels  = 2;
-    // Use 0 to let miniaudio pick the device's native sample rate. Forcing a
-    // fixed rate here can make a Bluetooth endpoint renegotiate its format.
     cfg.sampleRate         = 0;
     cfg.periodSizeInFrames  = 512;
     cfg.periods             = 2;
@@ -509,9 +458,7 @@ bool KeepAlive::configureImpl(const Settings &s) {
     cfg.notificationCallback = ws_notification_callback;
     cfg.pUserData          = m_impl;
     if (pChosen == nullptr) {
-        // Follow default endpoint on WASAPI reroute (important for BT A2DP)
         cfg.wasapi.noAutoStreamRouting = MA_FALSE;
-        // Avoid auto SRC changes that can trigger endpoint reinit
         cfg.wasapi.noAutoConvertSRC = MA_TRUE;
     }
 
@@ -526,9 +473,6 @@ bool KeepAlive::configureImpl(const Settings &s) {
         return false;
     }
 
-    // Record the endpoint WASAPI actually opened (may differ from the request
-    // when running in default-device mode). This is what the UI shows so the
-    // user can confirm the keep-alive is going to the Bluetooth speaker.
     m_impl->actualDeviceName   = m_impl->device.playback.name;
     m_impl->actualSampleRate   = static_cast<int>(m_impl->device.sampleRate);
     m_impl->actualPeriodFrames = static_cast<int>(m_impl->device.playback.internalPeriodSizeInFrames);
@@ -542,8 +486,6 @@ bool KeepAlive::configureImpl(const Settings &s) {
         ws_diag_log(ss.str());
     }
 
-    // If device supports different channels, respect? but we send interleaved to channels
-    // After init, device.playback.channels is actual
     WS_LOG_DEBUG("ma_device_start...");
     r = ma_device_start(&m_impl->device);
     WS_LOG_DEBUG("ma_device_start returned %d", r);
@@ -566,11 +508,6 @@ bool KeepAlive::configureImpl(const Settings &s) {
     return true;
 }
 
-// Called by the watchdog thread roughly every second. Rebuilds the stream only
-// when it is actually gone. A mere notification is NOT a reason to tear down a
-// running stream: on Bluetooth the stop/start churn itself becomes a continuous
-// stutter (and Windows keeps re-sending such notifications while a browser or
-// Spotify shares the endpoint).
 void KeepAlive::verifyAndRestart() {
     if (!m_impl) return;
     std::lock_guard<std::mutex> lk(m_impl->opMtx);
@@ -582,28 +519,22 @@ void KeepAlive::verifyAndRestart() {
 
     const bool alive = m_impl->running.load() && ma_device_is_started(&m_impl->device);
     if (alive) {
-        // Stream healthy: drop any pending notification without restarting it.
         if (m_impl->needRestart.exchange(false, std::memory_order_relaxed)) {
             ws_diag_log("watchdog: notification ignored (stream still running)");
         }
         return;
     }
 
-    // Stream is gone: rebuild it.
     m_impl->needRestart.store(false, std::memory_order_relaxed);
     ws_diag_log("watchdog: stream not running -> restart");
     configureImpl(m_impl->settings);
-    // A real teardown is the symptom we treat as a drop-out; the auto-tuner
-    // nudges the level up so the endpoint stops sleeping.
     m_impl->dropouts.fetch_add(1, std::memory_order_relaxed);
 }
 
-// Pure, testable core of the auto-tuner. dropouts > 0 raises the level toward
-// `max`; otherwise, once `stableSec` has elapsed, it decays toward `base`.
 float autoTuneNextLevel(float level, float base, float max,
                         unsigned dropouts, double stableSec, double stableThreshold) {
-    static constexpr float kUpStep   = 1.5f;   // +~3.5 dB per dropout
-    static constexpr float kDownStep = 0.97f;  // -0.26 dB per stable second
+    static constexpr float kUpStep   = 1.5f;
+    static constexpr float kDownStep = 0.97f;
     static constexpr float kEps      = 1e-4f;
     if (level < 0.0f) level = 0.0f;
     if (base < 0.0f) base = 0.0f;
@@ -621,11 +552,8 @@ float autoTuneNextLevel(float level, float base, float max,
     return level;
 }
 
-// Inverse volume factor: controls how strongly the auto-tune responds to
-// volume changes. 1.0 = full inverse relationship, 0.0 = no effect.
 static constexpr float kInverseVolumeFactor = 0.7f;
 
-// Convert amplitude to dBFS (clamped to valid range)
 inline float amplitudeToDb(float amplitude) {
     if (amplitude <= 0.0f) return -80.0f;
     float db = 20.0f * std::log10(amplitude);
@@ -634,17 +562,11 @@ inline float amplitudeToDb(float amplitude) {
     return db;
 }
 
-// Convert dBFS to amplitude
 inline float dbToAmplitude(float db) {
     if (db <= -80.0f) return 0.0f;
     return std::pow(10.0f, db / 20.0f);
 }
 
-// Auto-tune control loop (runs on the watchdog thread ~1/s). AIMD: on each
-// detected dropout the level is multiplied up to maxLevel; after a long stable
-// window it decays back toward the user baseline to keep the hiss minimal.
-// Additionally, the level is inversely adjusted based on the current volume
-// so that when output volume is high, noise is minimized, and vice versa.
 void KeepAlive::autoTuneStep() {
     if (!m_impl) return;
     std::lock_guard<std::mutex> lk(m_impl->opMtx);
@@ -656,44 +578,28 @@ void KeepAlive::autoTuneStep() {
         return;
     }
 
-    static constexpr double kStableSecs = 20.0;   // quiet window before decaying
+    static constexpr double kStableSecs = 20.0;
 
     const auto now = std::chrono::steady_clock::now();
     const unsigned n = m_impl->dropouts.exchange(0, std::memory_order_relaxed);
     const float base = m_impl->baseLevel.load(std::memory_order_relaxed);
     const float maxL = m_impl->maxLevel.load(std::memory_order_relaxed);
     const float cur  = m_level.load(std::memory_order_relaxed);
-    // The tuner may never decay below the learned floor: the level that was
-    // actually needed to survive a dropout. Decaying all the way back to the
-    // (possibly inaudible) baseline is what produced the periodic cut-outs.
     float floorL = m_impl->floorLevel.load(std::memory_order_relaxed);
     if (floorL < base) floorL = base;
     const double stable = std::chrono::duration<double>(now - m_impl->lastDropoutTime).count();
 
     if (n > 0) m_impl->lastDropoutTime = now;
 
-    // Standard auto-tune step based on drop-outs
     const float next = autoTuneNextLevel(cur, floorL, maxL, n, stable, kStableSecs);
 
-    // --- Inverse volume adjustment ---
-    // When the noise level setting is high (closer to 0 dBFS), the inverse
-    // target is low (more quiet). When the noise level setting is low, the
-    // inverse target allows a slightly higher noise floor.
-    // Formula: inverseTargetDb = -40 - currentDb, clamped to [-80, 0] range.
     float curDb = amplitudeToDb(cur);
-    // Target: when output is at 0 dBFS, noise should be at -40 dBFS max.
-    // When output is at -80 dBFS, noise can be at -80 dBFS (floor).
-    // We use a factor so it's not extremely aggressive.
     float inverseTargetDb = -40.0f - curDb;
-    // Scale factor: 0.5 means half the inverse, 1.0 means full inverse
     inverseTargetDb *= kInverseVolumeFactor;
-    // Clamp to valid dBFS range
     if (inverseTargetDb < -80.0f) inverseTargetDb = -80.0f;
     if (inverseTargetDb > 0.0f) inverseTargetDb = 0.0f;
     float inverseTarget = dbToAmplitude(inverseTargetDb);
 
-    // The final level is the standard auto-tune next, but never above the
-    // inverse volume target (so noise never gets too loud when volume is high)
     float finalNext = next;
     if (inverseTarget < finalNext) {
         finalNext = inverseTarget;
@@ -767,7 +673,6 @@ void KeepAlive::setAutoTune(bool enabled) {
     std::lock_guard<std::mutex> lk(m_impl->opMtx);
     const bool was = m_impl->autoTune.exchange(enabled, std::memory_order_relaxed);
     if (enabled && !was) {
-        // Start tuning from whatever level is currently applied.
         const float cur = m_level.load(std::memory_order_relaxed);
         m_impl->baseLevel.store(cur, std::memory_order_relaxed);
         m_impl->floorLevel.store(cur, std::memory_order_relaxed);
@@ -832,9 +737,6 @@ void setVerbose(bool enabled) {
 }
 
 std::string getBackendName() {
-    // Set at configure time from the backend miniaudio was built with (see
-    // CMakeLists.txt). MA_API cannot be used for this: it is miniaudio's
-    // linkage attribute, not a backend selector.
     return WS_AUDIO_BACKEND_NAME;
 }
 

@@ -4,7 +4,7 @@
 #include <string>
 
 #if defined(_WIN32)
-#include <stdlib.h>   // _wdupenv_s
+#include <stdlib.h>
 #endif
 
 namespace ws {
@@ -12,7 +12,6 @@ namespace platform {
 namespace {
 
 #if defined(_WIN32)
-// Windows: read a wide environment variable so non-ASCII paths survive.
 std::filesystem::path env(const wchar_t *name) {
     wchar_t *value = nullptr;
     size_t len = 0;

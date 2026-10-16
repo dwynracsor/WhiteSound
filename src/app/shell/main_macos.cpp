@@ -1,6 +1,3 @@
-// macOS entry point. GLFW (inside the flyout host) sets the NSApplication up,
-// so a plain main() is enough; the tray attaches to the same application.
-
 #include "app/platform/platform.h"
 #include "app/shell/shell.h"
 

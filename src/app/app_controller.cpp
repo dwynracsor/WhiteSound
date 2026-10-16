@@ -59,7 +59,6 @@ void Controller::load() {
         } catch (...) {}
     }
 
-    // Start in the state the last session was left in.
     m_enabled = m_config.enabled;
 }
 
@@ -83,7 +82,7 @@ void Controller::setEnabled(bool on) {
     if (on) {
         if (!m_engine->start(makeSettings())) {
             m_host->showError("Failed to start", m_engine->lastError());
-            return;   // stay disabled
+            return;
         }
     } else {
         m_engine->stop();

@@ -1,5 +1,3 @@
-// macOS process-level services: single instance and the native NSAlert dialog.
-
 #include "platform.h"
 
 #import <Cocoa/Cocoa.h>
@@ -16,7 +14,6 @@ namespace ws {
 namespace platform {
 namespace {
 
-// Held for the process lifetime; the kernel drops it on exit.
 int g_lockFd = -1;
 
 } // namespace
@@ -28,7 +25,7 @@ bool acquireSingleInstance() {
 
     const std::filesystem::path lockPath = dir / "ws.lock";
     g_lockFd = ::open(lockPath.c_str(), O_CREAT | O_RDWR, 0600);
-    if (g_lockFd < 0) return true;   // cannot lock: assume we are alone
+    if (g_lockFd < 0) return true;
     if (::flock(g_lockFd, LOCK_EX | LOCK_NB) != 0) {
         ::close(g_lockFd);
         g_lockFd = -1;

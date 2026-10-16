@@ -1,5 +1,3 @@
-// Linux entry point: platform bootstrapping, then the portable shell.
-
 #include "app/platform/platform.h"
 #include "app/shell/shell.h"
 

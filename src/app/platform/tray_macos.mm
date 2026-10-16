@@ -1,11 +1,3 @@
-// macOS system tray backend: an NSStatusItem with an NSMenu, plus a global
-// toggle hotkey registered through Carbon's RegisterEventHotKey (the modern
-// alternative, NSEvent global monitors, needs accessibility permission for key
-// events; the Carbon call does not).
-//
-// Compiled as Objective-C++ (no ARC: the objects are retained explicitly and
-// released in destroy()).
-
 #include "tray.h"
 
 #import <Cocoa/Cocoa.h>
@@ -20,7 +12,6 @@ namespace ws {
 namespace platform {
 namespace {
 
-// NSMenuItem tags -> TrayCommand.
 enum {
     kTagOpen = 1,
     kTagEnable,
@@ -29,8 +20,6 @@ enum {
     kTagQuit,
 };
 
-// Directory that holds the running executable, used to find the tray art next
-// to it (a plain build) or in the bundle / source tree (a .app or a dev build).
 std::string executableDir() {
     uint32_t size = 0;
     _NSGetExecutablePath(nullptr, &size);
@@ -46,8 +35,6 @@ std::string executableDir() {
 } // namespace platform
 } // namespace ws
 
-// Objective-C target for the status button and the menu items; it forwards to
-// the owning C++ ws::platform::MacTray through `owner`.
 @interface WSTrayTarget : NSObject {
 @public
     void *owner;
@@ -68,10 +55,9 @@ public:
     void setEnabled(bool enabled) override;
     void showMenu() override;
     void notify(const std::string &title, const std::string &body) override;
-    void pump() override {}   // Cocoa events arrive through GLFW's event pump
+    void pump() override {}
     bool hotkeyAvailable() const override { return m_hotkeyOk; }
 
-    // Called back from the Objective-C target / the hotkey handler.
     void dispatchCommand(int tag);
     void dispatchActivate();
     void dispatchHotkey();
@@ -145,7 +131,6 @@ bool MacTray::create(const TrayCallbacks &callbacks) {
 
     @autoreleasepool {
         [NSApplication sharedApplication];
-        // Tray-only application: no Dock icon and no application menu.
         [NSApp setActivationPolicy:NSApplicationActivationPolicyAccessory];
 
         m_target = [[WSTrayTarget alloc] init];
@@ -211,17 +196,12 @@ void MacTray::setEnabled(bool enabled) {
 
 void MacTray::showMenu() {
     if (!m_menu) return;
-    // Deprecated in name only: it is still the call that positions a status
-    // item's menu correctly. (popUpMenuPositioningItem: is the modern spelling.)
     if (m_status) {
         [m_status popUpStatusItemMenu:m_menu];
     }
 }
 
 void MacTray::notify(const std::string &, const std::string &) {
-    // macOS has no lightweight tray balloon: notifications would need the
-    // UserNotifications framework and a permission prompt. The first-run hint is
-    // therefore omitted here; the panel is reachable from the status item.
 }
 
 void MacTray::dispatchCommand(int tag) {
@@ -306,8 +286,6 @@ NSImage *MacTray::imageFor(bool on) const {
     }
 
     if (!image) {
-        // No art found next to the executable: fall back to a system symbol so
-        // the status item is never blank.
         if (@available(macOS 11.0, *)) {
             image = [[NSImage imageWithSystemSymbolName:@"waveform"
                                accessibilityDescription:@"White Sound"] retain];

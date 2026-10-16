@@ -1,14 +1,3 @@
-// Portable application shell.
-//
-// This is the only place that ties the three portable pieces together: the
-// controller (config + audio engine orchestration), the flyout window host and
-// the native tray. It contains no OS call at all, so the exact same loop drives
-// Windows, macOS and Linux; everything platform-specific lives behind
-// ws::platform::Tray and ws::platform::showMessage().
-//
-// Entry points (main_win32.cpp / main_macos.cpp / main_linux.cpp) only do the
-// per-OS bootstrapping (DPI, single instance) and then call shell::run().
-
 #include "shell.h"
 
 #include "app/app_controller.h"
@@ -31,12 +20,7 @@ namespace {
 
 using Clock = std::chrono::steady_clock;
 
-// Debounce window for persisting the config after a live change.
 constexpr auto kSaveDelay = std::chrono::milliseconds(500);
-// Wait for the window to settle before hiding it on focus loss. This is now
-// the only place that closes the panel on focus loss (the window backends no
-// longer hide it themselves), so it also has to be longer than the time it
-// takes a click on the taskbar button to reach the toggle logic.
 constexpr auto kFocusLossDelay = std::chrono::milliseconds(300);
 
 class Shell : public ws::app::Host {
@@ -44,18 +28,16 @@ public:
     int run();
 
 private:
-    // ---- loop helpers ------------------------------------------------------
     void handleCommand(ws::platform::TrayCommand command);
-    void activate();       // primary tray click
-    void togglePanel();    // hotkey / menu "Open panel"
-    void showPanel();      // bring the flyout up with a fresh snapshot
+    void activate();
+    void togglePanel();
+    void showPanel();
     void showConfig() const;
     void showAbout() const;
-    void requestClose();   // the panel's X / the taskbar button's close
+    void requestClose();
     void shutdown();
     void markDirty();
 
-    // ---- ws::app::Host -----------------------------------------------------
     void onEnabledChanged(bool enabled) override;
     void showError(const std::string &title, const std::string &message) override;
 
@@ -72,9 +54,6 @@ private:
     Clock::time_point m_dirtySince;
     bool m_focusLost = false;
     Clock::time_point m_focusLostSince;
-    // Number of close requests handled since the app started. The first one
-    // only steps back to the tray; the next one exits for good (see
-    // requestClose()).
     int m_closeCount = 0;
 };
 
@@ -82,8 +61,6 @@ int Shell::run() {
     m_controller = std::make_unique<ws::app::Controller>(this);
     m_controller->load();
 
-    // The window host first. On macOS it is what brings the NSApplication up
-    // that the status item later attaches to.
     m_flyout = ws::gui::createFlyout();
     m_guiOk = m_flyout && m_flyout->create(&m_model);
 
@@ -97,8 +74,6 @@ int Shell::run() {
     m_trayOk = m_tray && m_tray->create(callbacks);
     if (m_trayOk) m_tray->setEnabled(m_controller->enabled());
 
-    // Starts the engine if the last session was enabled; may report an error
-    // through showError() and leave the app disabled.
     m_controller->init();
 
     if (m_trayOk && m_controller->firstRun()) {
@@ -109,23 +84,18 @@ int Shell::run() {
 
     while (m_running) {
         if (m_guiOk && m_flyout->visible()) {
-            // One frame: service events, redraw, then react to the requests the
-            // panel raised (its window buttons and the focus-loss net).
             m_flyout->pumpEvents();
             if (!m_running) break;
 
             m_controller->syncModel(m_model);
             const bool guiChanged = m_flyout->renderFrame();
             if (m_model.requestQuit) {
-                // The panel's X button. Same two-step close as the taskbar
-                // button: the first press hides the panel and leaves the app in
-                // the tray, the next one exits.
                 m_model.requestQuit = false;
                 requestClose();
                 if (!m_running) break;
             }
             if (m_model.requestHide) {
-                m_flyout->hide();   // the window's minimize button
+                m_flyout->hide();
                 m_focusLost = false;
             }
             if (guiChanged) {
@@ -133,9 +103,6 @@ int Shell::run() {
                 markDirty();
             }
 
-            // Safety net: close when the window lost focus (covers the case
-            // where the OS never reported it). Only once the window actually
-            // held focus, to avoid hiding it when activation was refused.
             if (m_flyout->wasActive() && !m_flyout->hasFocus()) {
                 if (!m_focusLost) {
                     m_focusLost = true;
@@ -148,17 +115,13 @@ int Shell::run() {
                 m_focusLost = false;
             }
         } else if (m_guiOk) {
-            // Hidden: block for an event instead of spinning.
             m_flyout->waitEvents(0.05);
             m_flyout->pumpEvents();
             if (!m_running) break;
         } else {
-            // No renderer: keep the tray (and its hotkey) alive on their own.
             std::this_thread::sleep_for(std::chrono::milliseconds(50));
         }
 
-        // Linux services its D-Bus connection here; a no-op on Windows/macOS,
-        // where the window pump already delivered the tray's events.
         if (m_trayOk) m_tray->pump();
 
         if (m_dirty && Clock::now() - m_dirtySince > kSaveDelay) {
@@ -217,22 +180,14 @@ void Shell::togglePanel() {
 void Shell::showPanel() {
     m_controller->syncModel(m_model);
     ws::gui::refreshDevices(m_model);
-    m_model.bulbLit = 0.0f;   // the status lamp visibly switches on
-    // The panel is the app's only real window, so (on Windows) it also brings
-    // back the app's taskbar button while it is open.
+    m_model.bulbLit = 0.0f;
     if (m_trayOk) m_tray->setTaskbarVisible(true);
     m_flyout->showNearCursor();
 }
 
 void Shell::requestClose() {
-    // A close request comes from the panel's X button or from the taskbar
-    // button's own close (see the tray backend). The first one must not exit:
-    // it hides the panel and leaves the app running so the tray icon and the
-    // taskbar button stay. Only a following close really stops the app.
     if (m_closeCount++ == 0) {
         if (m_flyout) m_flyout->hide();
-        // Closing steps back to the tray only: drop the app's taskbar button so
-        // it is no longer listed on the taskbar while it keeps running.
         if (m_trayOk) m_tray->setTaskbarVisible(false);
         m_focusLost = false;
         return;
@@ -252,7 +207,6 @@ void Shell::markDirty() {
     m_dirtySince = Clock::now();
 }
 
-// ---- ws::app::Host ---------------------------------------------------------
 
 void Shell::onEnabledChanged(bool enabled) {
     if (m_trayOk) m_tray->setEnabled(enabled);
@@ -262,7 +216,6 @@ void Shell::showError(const std::string &title, const std::string &message) {
     ws::platform::showMessage(title, message, true);
 }
 
-// ---- dialogs ---------------------------------------------------------------
 
 void Shell::showConfig() const {
     const ws::KeepAlive::Config &cfg = m_controller->config();
@@ -286,9 +239,6 @@ void Shell::showConfig() const {
     msg += "\nAuto-tune: ";
     msg += (cfg.autoTune ? "on" : "off");
 
-    // effectiveLevel() is what is actually emitted: the auto-tuner's current
-    // value when it is on, otherwise the baseline. Shown whenever the engine
-    // exists, not only when the tuner is active.
     const ws::KeepAlive *engine = m_controller->engine();
     if (engine) {
         msg += " (effective " + std::to_string(engine->effectiveLevel()) + ")";
@@ -316,9 +266,6 @@ void Shell::showAbout() const {
     msg += ws::getBackendName();
     msg += ")";
 
-    // Global hotkey is registered by the tray (Windows/macOS; not on Linux). Say
-    // so when it is not active, since registration fails silently when another
-    // application already owns the combination.
     msg += "\nGlobal hotkey: ";
     msg += (m_trayOk && m_tray->hotkeyAvailable()) ? "active" : "not active";
 

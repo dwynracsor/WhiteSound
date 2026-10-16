@@ -1,16 +1,3 @@
-// Linux system tray backend.
-//
-// Implements the StatusNotifierItem protocol (org.kde.StatusNotifierItem) plus
-// the com.canonical.dbusmenu interface used by the desktop's tray host to draw
-// the context menu, directly over the session D-Bus with libdbus (no GTK, no
-// GTK main loop). The shell drives it from its own loop: pump() reads and
-// dispatches pending D-Bus traffic once per iteration.
-//
-// The item lives on this process's unique bus name at the conventional paths
-// /StatusNotifierItem and /MenuBar, and registers itself with the
-// StatusNotifierWatcher. If the watcher is not running yet, the match on
-// NameOwnerChanged makes us register as soon as it appears.
-
 #include "tray.h"
 
 #include <dbus/dbus.h>
@@ -35,7 +22,6 @@ const char *kWatcherName = "org.kde.StatusNotifierWatcher";
 const char *kWatcherPath = "/StatusNotifierWatcher";
 const char *kWatcherIface = "org.kde.StatusNotifierWatcher";
 
-// Stable menu item ids (the root is 0 by convention).
 enum {
     kIdRoot = 0,
     kIdOpen = 1,
@@ -109,7 +95,6 @@ const char *kIntrospectionXml =
     "  </interface>\n"
     "</node>\n";
 
-// ---- value helpers ---------------------------------------------------------
 
 void appendString(DBusMessageIter *it, const char *s) {
     dbus_message_iter_append_basic(it, DBUS_TYPE_STRING, &s);
@@ -218,24 +203,21 @@ public:
     bool create(const TrayCallbacks &callbacks) override;
     void destroy() override;
     void setEnabled(bool enabled) override;
-    void showMenu() override;   // the desktop draws the dbusmenu itself
+    void showMenu() override;
     void notify(const std::string &title, const std::string &body) override;
     void pump() override;
 
-    // Called by the D-Bus vtable/filter thunks.
     DBusHandlerResult onSniMessage(DBusConnection *conn, DBusMessage *msg);
     DBusHandlerResult onMenuMessage(DBusConnection *conn, DBusMessage *msg);
     void registerWithWatcher();
 
 private:
-    // Property emitters.
     bool appendSniProperty(DBusMessageIter *it, const char *name);
     bool appendMenuProperty(DBusMessageIter *it, const char *name);
     void appendItemProps(DBusMessageIter *array, int id);
     void appendLayout(DBusMessageIter *it, int id);
     void appendGroupEntry(DBusMessageIter *array, int id);
 
-    // Signals.
     void emitPropertiesChanged();
     void emitLayoutUpdated();
 
@@ -331,7 +313,6 @@ void LinuxTray::destroy() {
     dbus_connection_unregister_object_path(m_conn, kMenuPath);
     dbus_connection_flush(m_conn);
 
-    // Do not close a shared bus connection; just drop our reference.
     dbus_connection_unref(m_conn);
     m_conn = nullptr;
 }
@@ -371,8 +352,6 @@ void LinuxTray::setEnabled(bool enabled) {
 }
 
 void LinuxTray::showMenu() {
-    // The desktop shell owns the menu (it renders the dbusmenu we expose), so
-    // there is nothing to pop up here.
 }
 
 void LinuxTray::notify(const std::string &title, const std::string &body) {
@@ -419,15 +398,12 @@ void LinuxTray::pump() {
     }
     dbus_connection_flush(m_conn);
 
-    // Backstop for a watcher that started before us but was not yet owning the
-    // name, in case the NameOwnerChanged signal was missed.
     if (!m_registered && ++m_retryTicks >= 80) {
         m_retryTicks = 0;
         registerWithWatcher();
     }
 }
 
-// ---- properties ------------------------------------------------------------
 
 bool LinuxTray::appendSniProperty(DBusMessageIter *it, const char *name) {
     if (std::strcmp(name, "Category") == 0) {
@@ -533,7 +509,6 @@ void LinuxTray::appendGroupEntry(DBusMessageIter *array, int id) {
     dbus_message_iter_close_container(array, &entry);
 }
 
-// ---- signals ---------------------------------------------------------------
 
 void LinuxTray::emitPropertiesChanged() {
     if (!m_conn) return;
@@ -588,7 +563,6 @@ void LinuxTray::emitLayoutUpdated() {
     dbus_message_unref(signal);
 }
 
-// ---- replies ---------------------------------------------------------------
 
 void LinuxTray::replyEmpty(DBusConnection *conn, DBusMessage *msg) {
     DBusMessage *reply = dbus_message_new_method_return(msg);
@@ -617,13 +591,8 @@ void LinuxTray::dispatchCommand(int id) {
         case kIdQuit:   m_cb.onCommand(TrayCommand::Quit); break;
         default: return;
     }
-    // No local state change here. ToggleEnabled has the shell flip the
-    // controller, which calls back into setEnabled() (exactly like the Windows
-    // and macOS backends); toggling m_enabled again would invert the checkmark
-    // and the icon.
 }
 
-// ---- StatusNotifierItem messages ------------------------------------------
 
 DBusHandlerResult LinuxTray::onSniMessage(DBusConnection *conn,
                                           DBusMessage *msg) {
@@ -698,7 +667,6 @@ DBusHandlerResult LinuxTray::onSniMessage(DBusConnection *conn,
     return DBUS_HANDLER_RESULT_NOT_YET_HANDLED;
 }
 
-// ---- dbusmenu messages -----------------------------------------------------
 
 DBusHandlerResult LinuxTray::onMenuMessage(DBusConnection *conn,
                                            DBusMessage *msg) {

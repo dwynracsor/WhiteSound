@@ -1,6 +1,3 @@
-// Windows process-level services: single instance, DPI awareness and the native
-// message dialog. See platform.h for the contract.
-
 #include "platform.h"
 
 #include <windows.h>
@@ -11,10 +8,8 @@ namespace ws {
 namespace platform {
 namespace {
 
-// Owned for the process lifetime; the kernel releases it on exit.
 HANDLE g_instanceMutex = nullptr;
 
-// UTF-8 (the encoding the engine and the shell use) to UTF-16.
 std::wstring utf8ToWide(const std::string &s) {
     if (s.empty()) return std::wstring();
     const int len = MultiByteToWideChar(CP_UTF8, 0, s.c_str(), -1, nullptr, 0);

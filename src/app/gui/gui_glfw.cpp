@@ -1,17 +1,3 @@
-// Portable flyout host: GLFW + OpenGL3 + ImGui.
-//
-// This is the default window backend on every platform. It reimplements the
-// behaviour the native Win32 host provided:
-//   * borderless, always-on-top window, hidden from the taskbar (Windows);
-//   * rounded corners on Windows 11 (DWM) with a window-region fallback;
-//   * move by dragging the header;
-//   * hide on focus loss and on Esc;
-//   * remember where the user dragged it;
-//   * open next to the cursor (per-OS cursor query on Windows; the tray corner
-//     of the primary monitor elsewhere).
-//
-// ImGui's GLFW callbacks are installed, so input flows into the ImGui context.
-
 #include "flyout.h"
 
 #include "gui_ui.h"
@@ -40,25 +26,17 @@ namespace ws {
 namespace gui {
 namespace {
 
-// The panel is laid out at gui_ui.h's kFlyoutW x kFlyoutH, so the real window is
-// exactly that size: a shorter window clips the bottom of the layout (the worst
-// case is burst mode with the low-level warning, ~456 logical px tall).
 constexpr int kBaseW = kFlyoutW;
 constexpr int kBaseH = kFlyoutH;
 constexpr int kCornerRadius = 10;
 
 #if defined(_WIN32)
-// DWMWINDOWATTRIBUTE / DWM_WINDOW_CORNER_PREFERENCE values, spelled out so the
-// build does not need a recent SDK.
 constexpr DWORD kDwmwaWindowCornerPreference = 33;
 constexpr DWORD kDwmwaBorderColor = 34;
 constexpr int   kDwmscpRound = 2;
 constexpr DWORD kDwmColorNone = 0xFFFFFFFE;
 typedef HRESULT(WINAPI *DwmSetWindowAttributeFn)(HWND, DWORD, LPCVOID, DWORD);
 
-// Bring a window to the foreground even when our process is in the background
-// (a tray app usually is); the foreground lock otherwise ignores
-// SetForegroundWindow for a non-foreground process.
 void forceForeground(HWND hwnd) {
     if (!hwnd || GetForegroundWindow() == hwnd) return;
     DWORD fgThread = GetWindowThreadProcessId(GetForegroundWindow(), nullptr);
@@ -102,9 +80,6 @@ public:
         glfwWindowHint(GLFW_DECORATED, GLFW_FALSE);
         glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
         glfwWindowHint(GLFW_FLOATING, GLFW_TRUE);
-        // Hidden at startup: the tray's taskbar anchor is the app's permanent
-        // button, and a window that is shown but has not drawn a frame yet
-        // would just sit there as a black rectangle.
         glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
         glfwWindowHint(GLFW_SCALE_TO_MONITOR, GLFW_TRUE);
 
@@ -122,8 +97,6 @@ public:
         glfwMakeContextCurrent(m_window);
         glfwSwapInterval(1);
 
-        // Match the monitor's content scale (HiDPI). The window size is in
-        // screen coordinates; the ImGui style is scaled to match.
         float sx = 1.0f, sy = 1.0f;
         glfwGetWindowContentScale(m_window, &sx, &sy);
         m_scale = sx > 0.0f ? sx : 1.0f;
@@ -144,9 +117,6 @@ public:
         io.IniFilename = nullptr;
         io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
 
-        // Usar la fuente del sistema sin añadir ningún .ttf al proyecto:
-        // en Windows carga Segoe UI (la que usa Windows y es similar a la de Apple),
-        // que ya está en C:\Windows\Fonts. En otros SO se usa la fuente por defecto de ImGui.
 #if defined(_WIN32)
         if (io.Fonts->AddFontFromFileTTF("C:\\Windows\\Fonts\\segoeui.ttf", 16.0f) == nullptr) {
             io.Fonts->AddFontDefault();
@@ -166,8 +136,6 @@ public:
     }
 
     void destroy() override {
-        // Called once by the shell and again from ~GlfwFlyout(); every step below
-        // is guarded, so a second call is a no-op, but keep the intent explicit.
         if (m_destroyed) return;
         m_destroyed = true;
         if (m_ready) {
@@ -260,31 +228,18 @@ public:
     }
 
 private:
-    // ---- event callbacks ---------------------------------------------------
     static void onFocus(GLFWwindow *w, int focused) {
         auto *self = static_cast<GlfwFlyout *>(glfwGetWindowUserPointer(w));
         if (!self) return;
         if (focused) {
-            // Remember that the panel really held focus; the shell only closes
-            // it on focus loss after that, so a refused activation does not
-            // make it vanish.
             self->m_gotActive = true;
         }
-        // Losing focus is deliberately not handled here. The shell waits a
-        // short while (Shell::kFocusLossDelay) before closing the panel, so a
-        // click on the app's own taskbar button reaches the toggle logic while
-        // the panel is still visible. Hiding immediately would race that toggle
-        // and make the panel look like it refuses to close.
     }
     static void onClose(GLFWwindow *w) {
         auto *self = static_cast<GlfwFlyout *>(glfwGetWindowUserPointer(w));
         if (self) self->hide();
     }
 
-    // ---- placement ---------------------------------------------------------
-    // A point to open near. On Windows that is the cursor; elsewhere there is no
-    // portable global cursor, so fall back to the tray corner of the primary
-    // monitor.
     void anchorPos(int &x, int &y) const {
 #if defined(_WIN32)
         POINT p;
@@ -302,10 +257,8 @@ private:
         if (mw > 0 && mh > 0) {
             x = mx + mw - 24;
 #if defined(__APPLE__)
-            // The status item sits in the menu bar, along the top edge.
             y = my + 24;
 #else
-            // Most Linux trays sit along the bottom edge.
             y = my + mh - 24;
 #endif
             return;
@@ -314,7 +267,6 @@ private:
         y = 0;
     }
 
-    // The work area (in screen coordinates) of the monitor around (x, y).
     void workAreaAround(int x, int y, int &mx, int &my, int &mw, int &mh) const {
         mx = my = 0;
         mw = mh = 0;
@@ -337,8 +289,6 @@ private:
         if (mon) glfwGetMonitorWorkarea(mon, &mx, &my, &mw, &mh);
     }
 
-    // Open above the anchor, dropping below it if there is no room (like the
-    // native host).
     void placeNearAnchor(int ax, int ay, int w, int h, int &x, int &y) const {
         int mx = 0, my = 0, mw = 0, mh = 0;
         workAreaAround(ax, ay, mx, my, mw, mh);
@@ -353,7 +303,6 @@ private:
         }
     }
 
-    // Keep a remembered position inside the monitor it sits on.
     void clampToWorkArea(int &x, int &y, int w, int h) const {
         int mx = 0, my = 0, mw = 0, mh = 0;
         workAreaAround(x + w / 2, y + h / 2, mx, my, mw, mh);
@@ -364,7 +313,6 @@ private:
         if (y < my) y = my;
     }
 
-    // ---- manual drag (GLFW has no HTCAPTION) ------------------------------
     void updateDrag() {
         if (!m_model || !m_window) return;
         ImGuiIO &io = ImGui::GetIO();
@@ -373,14 +321,10 @@ private:
             !inAnyRect(m_model->dragExcludes, io.MousePos.x, io.MousePos.y);
 
         if (ImGui::IsMouseClicked(ImGuiMouseButton_Left) && onHeader) {
-            // Detect a double click ourselves: moving the window while dragging
-            // perturbs what ImGui records, so its own click-count bookkeeping is
-            // not reliable here.
             const double now = glfwGetTime();
             if (m_lastClickValid && (now - m_lastClickTime) <= 0.4 &&
                 std::fabs(io.MousePos.x - m_lastClickX) <= 8.0f &&
                 std::fabs(io.MousePos.y - m_lastClickY) <= 8.0f) {
-                // Double-click on the header forgets a dragged position.
                 m_lastClickValid = false;
                 resetPosition();
                 return;
@@ -400,11 +344,6 @@ private:
 
         if (m_dragging) {
             if (ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
-                // Keep the cursor at the same spot inside the window: the new
-                // origin is the current origin plus how far the cursor moved
-                // within the window since the drag started. (io.MousePos is
-                // window-relative, so the current origin is read back each
-                // frame to recover the global cursor position.)
                 int wx = 0, wy = 0;
                 glfwGetWindowPos(m_window, &wx, &wy);
                 const int nx = wx + static_cast<int>(io.MousePos.x - m_dragMouseX);
@@ -413,9 +352,6 @@ private:
                 glfwSetWindowPos(m_window, nx, ny);
             } else {
                 m_dragging = false;
-                // Only remember a position the user actually dragged to, so a
-                // plain click (or the click that follows a reset double-click)
-                // cannot pin the window.
                 if (m_dragMoved) {
                     int wx = 0, wy = 0;
                     glfwGetWindowPos(m_window, &wx, &wy);
@@ -428,21 +364,14 @@ private:
     }
 
 #if defined(_WIN32)
-    // Hide from the taskbar/alt-tab and round the corners, like the native host.
     void applyWindowsChrome() {
         HWND hwnd = glfwGetWin32Window(m_window);
         if (!hwnd) return;
         LONG_PTR ex = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
-        // The panel is a transient flyout: it must not own a taskbar button of
-        // its own, or every time it is open there would be two "White Sound"
-        // buttons. The tray's anchor window (tray_win32.cpp) is the app's
-        // permanent button, so this one stays a tool window.
         ex |= WS_EX_TOOLWINDOW;
         ex &= ~WS_EX_APPWINDOW;
         SetWindowLongPtrW(hwnd, GWL_EXSTYLE, ex);
 
-        // Apply the extended-style change so Windows honours it right away
-        // instead of waiting for the next size/move.
         SetWindowPos(hwnd, nullptr, 0, 0, 0, 0,
                      SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED);
 
@@ -470,7 +399,7 @@ private:
         if (w <= 0 || h <= 0) return;
         const int r = static_cast<int>(kCornerRadius * m_scale);
         HRGN rgn = CreateRoundRectRgn(0, 0, w + 1, h + 1, r * 2, r * 2);
-        if (rgn) SetWindowRgn(hwnd, rgn, TRUE);   // window takes ownership
+        if (rgn) SetWindowRgn(hwnd, rgn, TRUE);
     }
 #endif
 
@@ -478,7 +407,7 @@ private:
     GuiModel   *m_model = nullptr;
     bool        m_glfwInited = false;
     bool        m_ready = false;
-    bool        m_destroyed = false;   // destroy() runs twice (shell + dtor)
+    bool        m_destroyed = false;
     bool        m_visible = false;
     bool        m_gotActive = false;
     float       m_scale = 1.0f;
@@ -491,7 +420,6 @@ private:
     double m_dragMouseX = 0.0;
     double m_dragMouseY = 0.0;
 
-    // Our own double-click bookkeeping (see updateDrag).
     bool   m_lastClickValid = false;
     double m_lastClickTime = 0.0;
     float  m_lastClickX = 0.0f;

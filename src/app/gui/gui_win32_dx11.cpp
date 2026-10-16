@@ -1,10 +1,3 @@
-// Native fallback flyout host: Win32 + DirectX 11 + ImGui.
-//
-// The default backend is the portable GLFW + OpenGL3 host (gui_glfw.cpp); this
-// one is selected with -DWS_FLYOUT_BACKEND=win32 and reproduces the original
-// Windows behaviour exactly (DWM rounding, HTCAPTION dragging, WM_ACTIVATE
-// close). It implements the same ws::gui::Flyout interface.
-
 #include "flyout.h"
 
 #ifdef _WIN32
@@ -27,25 +20,17 @@ namespace ws {
 namespace gui {
 
 namespace {
-// Sized to the panel layout (gui_ui.h): the same layout fills the window, so a
-// shorter window would clip the bottom (burst mode + the low-level warning is
-// the worst case, ~456 logical px tall).
 constexpr int kBaseW = kFlyoutW;
 constexpr int kBaseH = kFlyoutH;
-constexpr int kCornerRadius = 10;   // logical px, scaled by DPI
+constexpr int kCornerRadius = 10;
 
-// DWMWINDOWATTRIBUTE / DWM_WINDOW_CORNER_PREFERENCE values, spelled out so the
-// build does not depend on a recent SDK.
 constexpr DWORD kDwmwaWindowCornerPreference = 33;
 constexpr DWORD kDwmwaBorderColor = 34;
-constexpr int   kDwmscpRound = 2;          // DWM_WINDOW_CORNER_PREFERENCE
-constexpr DWORD kDwmColorNone = 0xFFFFFFFE; // DWMWA_COLOR_NONE
+constexpr int   kDwmscpRound = 2;
+constexpr DWORD kDwmColorNone = 0xFFFFFFFE;
 
 typedef HRESULT(WINAPI *DwmSetWindowAttributeFn)(HWND, DWORD, LPCVOID, DWORD);
 
-// Bring a window to the foreground even when our process is in the background
-// (a system tray app usually is). Windows' foreground lock otherwise silently
-// ignores SetForegroundWindow for a non-foreground process.
 void forceForeground(HWND hwnd) {
     if (GetForegroundWindow() == hwnd) return;
     DWORD fgThread = GetWindowThreadProcessId(GetForegroundWindow(), nullptr);
@@ -61,7 +46,6 @@ void forceForeground(HWND hwnd) {
     }
 }
 
-// Keep a window fully inside the work area of the given monitor.
 void clampToMonitor(int &x, int &y, int w, int h, HMONITOR mon) {
     MONITORINFO mi = {};
     mi.cbSize = sizeof(mi);
@@ -106,8 +90,6 @@ public:
             nullptr, nullptr, m_hInstance, this);
         if (!m_hwnd) return false;
 
-        // Same artwork as the tray icon. The flyout is a tool window, so this only
-        // shows up in shell dialogs, but keep it consistent.
         SendMessageW(m_hwnd, WM_SETICON, ICON_BIG,
                      reinterpret_cast<LPARAM>(ws::icon::loadLarge()));
         SendMessageW(m_hwnd, WM_SETICON, ICON_SMALL,
@@ -136,9 +118,6 @@ public:
     }
 
     void destroy() override {
-        // The shell destroys the flyout explicitly and then drops it, so this
-        // runs a second time from ~Win32Flyout(). ImGui's DX11 backend frees its
-        // state on shutdown, so a second pass would dereference freed memory.
         if (m_destroyed) return;
         m_destroyed = true;
 
@@ -174,7 +153,6 @@ public:
         int x = 0;
         int y = 0;
         if (m_haveUserPos) {
-            // The user dragged the panel somewhere: reopen where it was left.
             x = m_userX;
             y = m_userY;
             POINT anchor = {x, y};
@@ -212,7 +190,6 @@ public:
     bool wasActive() const override { return m_gotActive; }
     bool hasFocus() const override { return m_hwnd && GetForegroundWindow() == m_hwnd; }
 
-    // Forget a dragged position so the next show() goes back to the cursor.
     void resetPosition() override { m_haveUserPos = false; }
 
     void pumpEvents() override {
@@ -261,7 +238,6 @@ private:
         HMODULE u = GetModuleHandleW(L"user32.dll");
         if (u) {
             typedef UINT(WINAPI * GetDpiForWindowFn)(HWND);
-            // The void* hop keeps GCC's -Wcast-function-type quiet for the FARPROC.
             auto fn = reinterpret_cast<GetDpiForWindowFn>(
                 reinterpret_cast<void *>(GetProcAddress(u, "GetDpiForWindow")));
             if (fn) dpi = fn(hwnd);
@@ -284,9 +260,6 @@ private:
         applyRoundedRegion();
     }
 
-    // Ask DWM to round the window corners (Windows 11). When that is not available
-    // (older Windows, attribute rejected) we clip the window with a rounded region
-    // instead, so the corners are still visibly rounded.
     void applyRoundedCorners() {
         m_dwmRounded = false;
         if (!m_hwnd) return;
@@ -299,7 +272,6 @@ private:
                 int pref = kDwmscpRound;
                 if (SUCCEEDED(setAttr(m_hwnd, kDwmwaWindowCornerPreference, &pref, sizeof(pref)))) {
                     m_dwmRounded = true;
-                    // No 1px outline around the rounded panel.
                     DWORD none = kDwmColorNone;
                     setAttr(m_hwnd, kDwmwaBorderColor, &none, sizeof(none));
                 }
@@ -310,8 +282,6 @@ private:
     }
 
     void applyRoundedRegion() {
-        // A window region would defeat DWM's own (antialiased) rounding, so only
-        // use it as a fallback.
         if (!m_hwnd || m_dwmRounded) return;
         RECT rc;
         if (!GetWindowRect(m_hwnd, &rc)) return;
@@ -320,7 +290,7 @@ private:
         if (w <= 0 || h <= 0) return;
         const int r = static_cast<int>(kCornerRadius * m_scale);
         HRGN rgn = CreateRoundRectRgn(0, 0, w + 1, h + 1, r * 2, r * 2);
-        if (rgn) SetWindowRgn(m_hwnd, rgn, TRUE);   // window takes ownership
+        if (rgn) SetWindowRgn(m_hwnd, rgn, TRUE);
     }
 
     void createRTV() {
@@ -383,8 +353,6 @@ private:
     }
 
     void cleanupDeviceObjects() {
-        // Only an initialised ImGui DX11 backend may be shut down; its state lives
-        // in the ImGui context, which destroy() tears down afterwards.
         if (ImGui::GetCurrentContext() && ImGui::GetIO().BackendRendererUserData) {
             ImGui_ImplDX11_Shutdown();
         }
@@ -415,11 +383,6 @@ private:
 
             case WM_ACTIVATE:
                 if (LOWORD(wParam) == WA_INACTIVE) {
-                    // Losing focus is not handled here: the shell waits a short
-                    // while (Shell::kFocusLossDelay) before closing the panel, so
-                    // a click on the app's own taskbar button reaches the toggle
-                    // logic while the panel is still visible. Hiding immediately
-                    // would race that toggle.
                 } else {
                     m_gotActive = true;
                 }
@@ -433,9 +396,6 @@ private:
                 break;
 
             case WM_MOVE:
-                // Remember where a user-dragged panel ends up. Programmatic
-                // placement happens while the window is still hidden, so it does
-                // not overwrite the user's position.
                 if (m_visible) {
                     RECT r;
                     if (GetWindowRect(hwnd, &r)) {
@@ -447,8 +407,6 @@ private:
                 return 0;
 
             case WM_NCHITTEST: {
-                // No frame: make the header behave like a title bar so the panel can
-                // be dragged anywhere, while the widgets inside it keep working.
                 if (m_model && m_visible) {
                     POINT p;
                     p.x = static_cast<LONG>(static_cast<short>(LOWORD(lParam)));
@@ -465,8 +423,6 @@ private:
             }
 
             case WM_NCLBUTTONDBLCLK:
-                // Double-click on the header forgets a dragged position: the panel
-                // goes back to opening next to the cursor.
                 if (wParam == HTCAPTION) {
                     resetPosition();
                     return 0;
@@ -515,11 +471,11 @@ private:
     GuiModel   *m_model = nullptr;
     bool        m_visible = false;
     bool        m_ready = false;
-    bool        m_destroyed = false;   // destroy() is called twice (shell + dtor)
+    bool        m_destroyed = false;
     bool        m_gotActive = false;
     float       m_scale = 1.0f;
     bool        m_dwmRounded = false;
-    bool        m_haveUserPos = false;   // panel was dragged by the user
+    bool        m_haveUserPos = false;
     int         m_userX = 0;
     int         m_userY = 0;
     wchar_t     m_className[64] = {};

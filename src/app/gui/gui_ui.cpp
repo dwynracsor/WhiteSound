@@ -76,8 +76,6 @@ static std::string devicePreview(const GuiModel &m) {
     return "Device " + std::to_string(m.settings.deviceIndex);
 }
 
-// The device the stream is actually using: while running, the endpoint WASAPI
-// resolved (which may differ from "Default"); otherwise the configured one.
 static std::string connectedDeviceLabel(const GuiModel &m) {
     if (m.keepAlive && m.keepAlive->running()) {
         const std::string opened = m.keepAlive->lastOpenedDeviceName();
@@ -86,14 +84,6 @@ static std::string connectedDeviceLabel(const GuiModel &m) {
     return devicePreview(m);
 }
 
-// ---------------------------------------------------------------------------
-// Status bulb
-//
-// The header shows the app icon as a little lamp instead of a flat dot: dark and
-// unlit while the app is inactive, and lit with the icon's cyan-to-blue badge,
-// white wave and a soft halo while it keeps the speaker awake. The artwork
-// mirrors assets/white_sound.ico (see tools/make_icon.ps1).
-// ---------------------------------------------------------------------------
 
 static ImVec4 lerpColor(const ImVec4 &a, const ImVec4 &b, float t) {
     return ImVec4(a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t,
@@ -104,13 +94,10 @@ static ImU32 colorWithAlpha(const ImVec4 &c, float alphaMul) {
     return ImGui::GetColorU32(ImVec4(c.x, c.y, c.z, c.w * alphaMul));
 }
 
-// The sine of the icon, drawn as a ribbon of constant vertical thickness: a
-// stroked polyline would notch at the joins at this size. pMin is the top-left
-// of the badge square the wave lives in.
 static void addWaveRibbon(ImDrawList *dl, const ImVec2 &pMin, float size,
                           ImU32 col, float sc) {
     const float mid   = pMin.y + size * 0.5f;
-    const float amp   = size * 0.175f;                          // one full cycle
+    const float amp   = size * 0.175f;
     const float thick = (size * 0.105f > 2.0f * sc) ? size * 0.105f : 2.0f * sc;
     const float x0    = pMin.x + size * 0.205f;
     const float x1    = pMin.x + size * 0.795f;
@@ -128,24 +115,19 @@ static void addWaveRibbon(ImDrawList *dl, const ImVec2 &pMin, float size,
     }
 }
 
-// Draws the lamp with its top-left corner at pMin. `lit` is the 0..1 ramp
-// between the unlit LED and the fully lit icon, `pulse` the 0..1 breathe value.
 static void drawStatusBulb(ImDrawList *dl, const ImVec2 &pMin, float size,
                            float lit, float pulse, float sc) {
     const ImVec2 pMax(pMin.x + size, pMin.y + size);
     const float rounding = size * 0.24f;
 
-    // Unlit LED vs the icon's gradient colours.
     const ImVec4 offTop  = ImVec4(0.13f, 0.17f, 0.23f, 1.0f);
     const ImVec4 offBot  = ImVec4(0.09f, 0.12f, 0.17f, 1.0f);
     const ImVec4 offWave = ImVec4(0.42f, 0.47f, 0.57f, 1.0f);
-    const ImVec4 onTop   = ImVec4(0.24f, 0.78f, 1.00f, 1.0f);   // #3EC8FF, as the .ico
-    const ImVec4 onBot   = ImVec4(0.11f, 0.41f, 0.87f, 1.0f);   // #1C68DE
+    const ImVec4 onTop   = ImVec4(0.24f, 0.78f, 1.00f, 1.0f);
+    const ImVec4 onBot   = ImVec4(0.11f, 0.41f, 0.87f, 1.0f);
     const ImVec4 onWave  = ImVec4(1.00f, 1.00f, 1.00f, 1.0f);
-    const ImVec4 halo    = ImVec4(0.26f, 0.59f, 0.98f, 1.0f);   // the panel accent
+    const ImVec4 halo    = ImVec4(0.26f, 0.59f, 0.98f, 1.0f);
 
-    // Halo: three rounded rects growing outwards, faded in by the ramp and
-    // breathing gently while lit.
     if (lit > 0.01f) {
         const float spread[3] = {2.0f, 4.5f, 7.0f};
         const float alpha[3]  = {0.34f, 0.16f, 0.07f};
@@ -159,8 +141,6 @@ static void drawStatusBulb(ImDrawList *dl, const ImVec2 &pMin, float size,
         }
     }
 
-    // Badge: mid colour plus a lighter top and a darker bottom band, which reads
-    // as the icon's gradient (a true vertex gradient would need a custom path).
     const ImVec4 top = lerpColor(offTop, onTop, lit);
     const ImVec4 bot = lerpColor(offBot, onBot, lit);
     dl->AddRectFilled(pMin, pMax, colorWithAlpha(lerpColor(top, bot, 0.5f), 1.0f), rounding);
@@ -172,8 +152,6 @@ static void drawStatusBulb(ImDrawList *dl, const ImVec2 &pMin, float size,
     addWaveRibbon(dl, pMin, size, colorWithAlpha(lerpColor(offWave, onWave, lit), 1.0f), sc);
 }
 
-// A tiny title-bar button whose glyph is drawn by hand (the bundled bitmap font
-// has no window glyphs). Returns true when clicked.
 static bool titleBarButton(const char *id, const ImVec2 &pos, float w, float h,
                            float sc, bool closeGlyph, const char *tooltip) {
     ImGui::SetCursorScreenPos(pos);
@@ -188,8 +166,6 @@ static bool titleBarButton(const char *id, const ImVec2 &pos, float w, float h,
                           ImGui::GetColorU32(col), 5.0f * sc);
     }
 
-    // Discreet by default so the glyphs do not draw the eye, but still readable;
-    // they brighten up while hovered so the buttons stay easy to hit.
     const ImU32 fg = ImGui::GetColorU32(hovered ? ImVec4(0.86f, 0.86f, 0.91f, 1.0f)
                                                 : ImVec4(0.45f, 0.45f, 0.50f, 1.0f));
     const ImVec2 c(pos.x + w * 0.5f, pos.y + h * 0.5f);
@@ -209,7 +185,6 @@ bool drawFlyout(GuiModel &m) {
     bool changed = false;
     const float sc = ImGui::GetIO().FontGlobalScale;
 
-    // Requests from the previous frame are one-shot.
     m.requestHide = false;
     m.requestQuit = false;
     m.dragExcludes.clear();
@@ -217,9 +192,6 @@ bool drawFlyout(GuiModel &m) {
     ImGuiViewport *vp = ImGui::GetMainViewport();
     ImGui::SetNextWindowPos(vp->WorkPos);
     ImGui::SetNextWindowSize(ImVec2(static_cast<float>(kFlyoutW), static_cast<float>(kFlyoutH)));
-    // Rounded background: on Windows 11 the OS also rounds the window frame
-    // itself; elsewhere this still gives the panel soft corners over the darker
-    // clear colour.
     ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 10.0f * sc);
     ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
 
@@ -233,9 +205,6 @@ bool drawFlyout(GuiModel &m) {
     const float contentW = ImGui::GetContentRegionAvail().x;
     const float windowW = contentW + 2.0f * ImGui::GetStyle().WindowPadding.x;
 
-    // ---- Title bar: minimize / close at the top right ----
-    // The bar (plus the header below it) doubles as a title bar: the host turns
-    // a click on it into a caption hit-test so the flyout can be dragged.
     const ImVec2 barPos = ImGui::GetCursorScreenPos();
     const float barBtnW = 26.0f * sc;
     const float barBtnH = 20.0f * sc;
@@ -255,17 +224,11 @@ bool drawFlyout(GuiModel &m) {
         m.dragExcludes.push_back(UiRect{closePos.x, closePos.y, barBtnW, barBtnH});
     }
 
-    // ---- Header: status bulb + label + connected device + power toggle ----
     const ImVec2 headerPos = ImGui::GetCursorScreenPos();
     const float bulbSize = kBulbSize * sc;
     const float textIndent = bulbSize + kBulbGap * sc;
     float headerBottom = headerPos.y;
     {
-        // Ramp the lamp towards the current state. The host resets bulbLit when
-        // the panel is shown, so an active app visibly switches the bulb on.
-        // DeltaTime is huge on the first frame after the panel was hidden (the
-        // render loop stops while hidden), so it is clamped: the ramp then plays
-        // out over real frames instead of jumping straight to the target.
         float dt = ImGui::GetIO().DeltaTime;
         if (dt > 1.0f / 30.0f) dt = 1.0f / 30.0f;
         if (dt < 0.0f) dt = 0.0f;
@@ -280,8 +243,6 @@ bool drawFlyout(GuiModel &m) {
 
         const float lineH = ImGui::GetTextLineHeight();
         const ImVec2 p = ImGui::GetCursorScreenPos();
-        // Centred on the status line; the header height is set by the power
-        // button, so the lamp overhanging the text line does not move anything.
         drawStatusBulb(ImGui::GetWindowDrawList(),
                        ImVec2(p.x, p.y + lineH * 0.5f - bulbSize * 0.5f), bulbSize,
                        m.bulbLit,
@@ -306,8 +267,6 @@ bool drawFlyout(GuiModel &m) {
         const ImVec2 bMax = ImGui::GetItemRectMax();
         m.dragExcludes.push_back(UiRect{bMin.x, bMin.y, bMax.x - bMin.x, bMax.y - bMin.y});
 
-        // Device in use, right below the status text (placed explicitly so the
-        // taller power button does not push it an extra item-spacing down).
         ImGui::SetCursorScreenPos(ImVec2(headerPos.x + textIndent, bMax.y + 2.0f * sc));
         ImGui::TextDisabled("%s", connectedDeviceLabel(m).c_str());
 
@@ -315,9 +274,6 @@ bool drawFlyout(GuiModel &m) {
         if (bMax.y > headerBottom) headerBottom = bMax.y;
     }
 
-    // The header (title bar + status block) is the drag handle, but only the
-    // title-bar strip lights up on hover: the status text, the power button and
-    // the device line keep their normal look.
     m.dragArea = UiRect{0.0f, 0.0f, windowW, headerBottom + 2.0f * sc};
     const UiRect barRect{0.0f, 0.0f, windowW, barPos.y + barBtnH + 2.0f * sc};
     if (barRect.valid() &&
@@ -334,7 +290,6 @@ bool drawFlyout(GuiModel &m) {
     ImGui::Separator();
     ImGui::Spacing();
 
-    // ---- Device selector ----
     ImGui::TextDisabled("Device");
     ImGui::SetNextItemWidth(contentW);
     const std::string preview = devicePreview(m);
@@ -365,7 +320,6 @@ bool drawFlyout(GuiModel &m) {
 
     ImGui::Spacing();
 
-    // ---- Volume (perceptual dBFS) ----
     float db = amplitudeToDb(m.settings.level);
     ImGui::TextDisabled("Volume");
     {
@@ -377,7 +331,6 @@ bool drawFlyout(GuiModel &m) {
     }
     ImGui::SetNextItemWidth(contentW);
     bool volumeChanged = ImGui::SliderFloat("##volume", &db, kMinDb, kMaxDb, "");
-    // The wheel nudges the volume too while the pointer is over the slider.
     if (ImGui::IsItemHovered()) {
         const float wheel = ImGui::GetIO().MouseWheel;
         if (wheel != 0.0f) {
@@ -396,7 +349,6 @@ bool drawFlyout(GuiModel &m) {
                            "Level too low: may cut out");
     }
 
-    // ---- Noise type ----
     ImGui::TextDisabled("Noise type");
     ImGui::SetNextItemWidth(contentW);
     {
@@ -409,8 +361,6 @@ bool drawFlyout(GuiModel &m) {
         }
     }
     if (ImGui::IsItemHovered()) {
-        // The panel is narrow: a hard-wrapped hint would be wider than the
-        // window and get cut off on the right, so let ImGui soft-wrap it.
         ImGui::BeginTooltip();
         ImGui::PushTextWrapPos(ImGui::GetFontSize() * kWrapChars);
         ImGui::TextUnformatted("White: even energy across the whole spectrum (best for "
@@ -422,7 +372,6 @@ bool drawFlyout(GuiModel &m) {
         ImGui::EndTooltip();
     }
 
-    // ---- Burst parameters ----
     if (m.settings.noiseMode == 2) {
         ImGui::SetNextItemWidth(contentW);
         if (ImGui::SliderInt("##burstdur", &m.settings.burstDurationMs, 20, 500, "Length: %d ms")) {
@@ -452,7 +401,6 @@ bool drawFlyout(GuiModel &m) {
         }
     }
 
-    // ---- Auto-tune: raise the level automatically on drop-outs ----
     if (ImGui::Checkbox("Auto-tune", &m.settings.autoTune)) {
         changed = true;
     }
