@@ -1,7 +1,7 @@
 // Windows resources: application icons, version metadata and the application
 // manifest.
 //
-// Compiled into white_sound_tray.exe so Windows can show the icon in Explorer,
+// Compiled into white-sound.exe so Windows can show the icon in Explorer,
 // in the file properties dialog and in the tray, report the version in the
 // Details tab, and apply the DPI/execution-level settings from the manifest.
 //

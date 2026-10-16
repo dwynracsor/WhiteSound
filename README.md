@@ -145,10 +145,11 @@ warn on first run.
 
 macOS packages can only be built on macOS (they need the Apple SDK). If you do not
 have a Mac, the
-[`build-installers` workflow](.github/workflows/build-installers.yml) builds the
-`.dmg` (universal) **and** the Linux `.tar.gz` on GitHub's runners and publishes
-them as downloadable artifacts (Actions → Build installers → Run workflow). See
-[`installers/README.md`](installers/README.md) for the details.
+[`build-installers` workflow](.github/workflows/build-installers.yml) builds all
+three installers on GitHub's runners: run it manually (Actions → Build installers
+→ Run workflow) to download them as artifacts, or push a `v*` tag to publish them
+on a GitHub Release. See [`installers/README.md`](installers/README.md) for the
+details.
 
 ## Usage
 

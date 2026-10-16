@@ -1,8 +1,11 @@
 name: Build installers
 
-# Builds the packages that cannot be produced from Windows: the macOS .dmg and
-# the Linux tarball. Run it from the Actions tab ("Run workflow") or by pushing
-# a tag, then download the artifacts. Nothing is committed back to the repo.
+# Builds the three platform installers. On a manual run
+# (Actions -> Build installers -> Run workflow) they are uploaded as workflow
+# artifacts. On a v* tag push they are also attached to a GitHub Release, which
+# is the permanent, public download page.
+#
+# Nothing is committed back to the repository.
 
 on:
   workflow_dispatch:
@@ -14,6 +17,51 @@ permissions:
   contents: read
 
 jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up MinGW-w64 (MSYS2)
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: false
+          install: >-
+            mingw-w64-x86_64-gcc
+            mingw-w64-x86_64-cmake
+            mingw-w64-x86_64-ninja
+
+      - name: Build white-sound.exe
+        shell: msys2 {0}
+        run: |
+          cmake -G Ninja -B build -S . -DCMAKE_BUILD_TYPE=Release
+          cmake --build build
+
+      - name: Compile the installer (Inno Setup)
+        shell: pwsh
+        run: |
+          $candidates = @(
+            "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
+            "$env:ProgramFiles\Inno Setup 6\ISCC.exe",
+            "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe"
+          )
+          $iscc = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $iscc) {
+            choco install innosetup -y --no-progress
+            $iscc = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+          }
+          if (-not $iscc) { throw "ISCC.exe not found" }
+          & $iscc installers\windows\white_sound.iss
+          if ($LASTEXITCODE -ne 0) { throw "ISCC failed (exit $LASTEXITCODE)" }
+
+      - name: Upload the installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: white-sound-windows
+          path: installers/WhiteSoundSetup-*.exe
+          if-no-files-found: error
+
   macos:
     runs-on: macos-latest
     steps:
@@ -54,3 +102,34 @@ jobs:
           name: white-sound-linux
           path: installers/white-sound-*-linux-*.tar.gz
           if-no-files-found: error
+
+  release:
+    # Only when a v* tag is pushed; manual runs just produce the artifacts.
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [windows, macos, linux]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download the installers
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+
+      - name: Create or update the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          files=(
+            dist/white-sound-windows/*.exe
+            dist/white-sound-macos/*.dmg
+            dist/white-sound-linux/*.tar.gz
+          )
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" "${files[@]}" --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" "${files[@]}" \
+              --title "White Sound $GITHUB_REF_NAME" \
+              --generate-notes \
+              --verify-tag
+          fi

@@ -69,12 +69,22 @@ host resolve the `IconName` the StatusNotifierItem advertises.
 
 ## Building in the cloud
 
-`installers/` → `.github/workflows/build-installers.yml` builds the macOS `.dmg`
-and the Linux `.tar.gz` on GitHub's runners:
+`.github/workflows/build-installers.yml` builds all three installers on GitHub's
+runners (Windows with MinGW-w64, macOS universal, Linux):
 
-1. Push the repository to GitHub.
-2. **Actions → Build installers → Run workflow**.
-3. Download the `white-sound-macos` and `white-sound-linux` artifacts.
+**On demand** — Actions → Build installers → Run workflow, then download the
+`white-sound-windows`, `white-sound-macos` and `white-sound-linux` artifacts.
+These are temporary (they expire).
 
-It also runs automatically when you push a `v*` tag. Nothing is committed back to
-the repository; the installers are only attached as workflow artifacts.
+**As a release** — push a version tag and the installers are attached to a GitHub
+Release, which is the permanent, public download page:
+
+```sh
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+The tag name is free-form; keep it in step with the `project(... VERSION ...)`
+line in `CMakeLists.txt` (e.g. `v1.0.0` for version `1.0.0`). Re-running on the
+same tag updates the existing release. Nothing is committed back to the
+repository.
