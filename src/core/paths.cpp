@@ -4,7 +4,7 @@
 #include <string>
 
 #if defined(_WIN32)
-#include <stdlib.h>
+#include <windows.h>
 #endif
 
 namespace ws {
@@ -13,14 +13,13 @@ namespace {
 
 #if defined(_WIN32)
 std::filesystem::path env(const wchar_t *name) {
-    wchar_t *value = nullptr;
-    size_t len = 0;
-    if (_wdupenv_s(&value, &len, name) == 0 && value) {
-        std::filesystem::path p(value);
-        std::free(value);
-        return p;
-    }
-    return {};
+    DWORD size = GetEnvironmentVariableW(name, nullptr, 0);
+    if (size == 0) return {};
+    std::wstring value(size, L'\0');
+    DWORD written = GetEnvironmentVariableW(name, value.data(), size);
+    if (written == 0 || written >= size) return {};
+    value.resize(written);
+    return std::filesystem::path(value);
 }
 #else
 std::filesystem::path env(const char *name) {

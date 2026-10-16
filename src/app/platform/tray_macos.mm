@@ -290,7 +290,7 @@ NSImage *MacTray::imageFor(bool on) const {
             image = [[NSImage imageWithSystemSymbolName:@"waveform"
                                accessibilityDescription:@"White Sound"] retain];
         }
-        if (image) image.template = YES;
+        if (image) [image setTemplate:YES];
     }
 
     if (image) image.size = NSMakeSize(18.0, 18.0);
