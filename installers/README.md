@@ -42,6 +42,11 @@ the tray PNGs and a generated `.icns` in `Contents/Resources`, and an
 The bundle is only ad-hoc signed, so the first launch needs a **right-click →
 Open**.
 
+Building macOS packages requires macOS. If you do not have a Mac, the
+[GitHub Actions workflow](../.github/workflows/build-installers.yml) builds the
+`.dmg` (as a universal binary, arm64 + x86_64) and publishes it as a downloadable
+artifact — see [Building in the cloud](#building-in-the-cloud).
+
 ## Linux (portable tarball)
 
 ```sh
@@ -61,3 +66,26 @@ sh white-sound-<version>-linux-<arch>/install.sh --system # into /usr/local
 `install.sh` also takes `--autostart` (writes an `~/.config/autostart` entry) and
 `--uninstall`. Installing the icon into the theme is what lets the desktop's tray
 host resolve the `IconName` the StatusNotifierItem advertises.
+
+On Windows, the same tarball can be produced from WSL (Ubuntu) without a separate
+Linux machine:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File installers\linux\build_linux_via_wsl.ps1
+```
+
+WSL2 must be enabled first (`wsl --install`, then reboot once). The script
+installs the build dependencies inside Ubuntu, builds, and writes the `.tar.gz`
+straight into this folder.
+
+## Building in the cloud
+
+`installers/` → `.github/workflows/build-installers.yml` builds the macOS `.dmg`
+and the Linux `.tar.gz` on GitHub's runners:
+
+1. Push the repository to GitHub.
+2. **Actions → Build installers → Run workflow**.
+3. Download the `white-sound-macos` and `white-sound-linux` artifacts.
+
+It also runs automatically when you push a `v*` tag. Nothing is committed back to
+the repository; the installers are only attached as workflow artifacts.

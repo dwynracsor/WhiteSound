@@ -1,0 +1,56 @@
+name: Build installers
+
+# Builds the packages that cannot be produced from Windows: the macOS .dmg and
+# the Linux tarball. Run it from the Actions tab ("Run workflow") or by pushing
+# a tag, then download the artifacts. Nothing is committed back to the repo.
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build White Sound.app and .dmg
+        env:
+          # Universal binary so the .dmg runs on Apple Silicon and Intel.
+          WS_MACOS_ARCHS: "arm64;x86_64"
+        run: sh installers/macos/build_app.sh
+
+      - name: Upload the .dmg
+        uses: actions/upload-artifact@v4
+        with:
+          name: white-sound-macos
+          path: installers/*.dmg
+          if-no-files-found: error
+
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake ninja-build pkg-config \
+            xorg-dev libwayland-dev libxkbcommon-dev libgl1-mesa-dev \
+            libdbus-1-dev libasound2-dev libpulse-dev
+
+      - name: Build the tarball
+        run: sh installers/linux/build_tarball.sh
+
+      - name: Upload the tarball
+        uses: actions/upload-artifact@v4
+        with:
+          name: white-sound-linux
+          path: installers/white-sound-*-linux-*.tar.gz
+          if-no-files-found: error

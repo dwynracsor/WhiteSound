@@ -31,9 +31,16 @@ if [ -z "$version" ]; then
     exit 1
 fi
 
+# WS_MACOS_ARCHS="arm64;x86_64" produces a universal binary; unset builds for
+# the host architecture only.
+archs=""
+if [ -n "${WS_MACOS_ARCHS:-}" ]; then
+    archs="-DCMAKE_OSX_ARCHITECTURES=$WS_MACOS_ARCHS"
+fi
+
 echo "==> Building White Sound $version"
-# shellcheck disable=SC2086  # $gen is empty or "-G Ninja"
-cmake $gen -B "$root/$build_dir" -S "$root" -DCMAKE_BUILD_TYPE=Release
+# shellcheck disable=SC2086  # $gen and $archs are empty or single flags
+cmake $gen $archs -B "$root/$build_dir" -S "$root" -DCMAKE_BUILD_TYPE=Release
 cmake --build "$root/$build_dir" --parallel
 
 bin="$root/$build_dir/white-sound"
