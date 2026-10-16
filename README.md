@@ -52,6 +52,9 @@ in the system tray, with a native backend on Windows, macOS and Linux.
   - at least one audio backend's development headers (`libasound2-dev` for ALSA,
     `libpulse-dev` for PulseAudio or `libjack-dev` for JACK). CMake compiles only
     the backends it finds.
+- Optional, to build the installers (see [Installers](#installers)):
+  [Inno Setup 6](https://jrsoftware.org/isinfo.php) on Windows
+  (`winget install JRSoftware.InnoSetup`); nothing extra on macOS/Linux
 
 ## Building
 
@@ -125,6 +128,20 @@ macOS/Linux).
 > built or run on those systems yet, so treat them as a starting point rather
 > than a finished port. See
 > [Verifying on macOS/Linux](#verifying-on-macoslinux) for the checks to run.
+
+## Installers
+
+Each platform has its own packaging script under `installers/` (see
+[`installers/README.md`](installers/README.md)); build it on the target OS:
+
+| Platform | Command | Output |
+| --- | --- | --- |
+| Windows | `powershell -ExecutionPolicy Bypass -File installers\windows\build_installer.ps1` | per-user Inno Setup installer (`installers\WhiteSoundSetup-<version>.exe`, no UAC) |
+| macOS | `sh installers/macos/build_app.sh` | `installers/White Sound.app` + `White Sound-<version>.dmg` |
+| Linux | `sh installers/linux/build_tarball.sh` | `installers/white-sound-<version>-linux-<arch>.tar.gz` (with `install.sh`) |
+
+None of the packages are code-signed, so Windows SmartScreen and macOS Gatekeeper
+warn on first run.
 
 ## Usage
 

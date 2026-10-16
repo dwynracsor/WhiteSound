@@ -1,0 +1,4 @@
+# Generated packages (produced by the platform scripts). The root .gitignore
+# already covers *.exe, *.dmg and *.tar.gz; this adds the macOS app bundle.
+/White Sound.app/
+/white-sound-*-linux-*/

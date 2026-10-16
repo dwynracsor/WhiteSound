@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=White Sound
+GenericName=Bluetooth Keep Alive
+Comment=Keeps Bluetooth speakers awake with very low level noise
+Exec=@EXEC@
+Icon=white-sound
+Terminal=false
+Categories=Utility;AudioVideo;
+Keywords=bluetooth;audio;keepalive;noise;
+StartupNotify=false

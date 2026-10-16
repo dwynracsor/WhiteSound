@@ -31,6 +31,11 @@ configure_file(
     ${WS_GENERATED_DIR}/white_sound.manifest
     @ONLY
 )
+configure_file(
+    ${CMAKE_CURRENT_SOURCE_DIR}/installers/windows/version.iss.in
+    ${WS_GENERATED_DIR}/version.iss
+    @ONLY
+)
 
 # Core library: the portable audio engine plus the per-OS paths helper. Has no
 # dependency on the window/tray layer, so it can be reused on every platform.

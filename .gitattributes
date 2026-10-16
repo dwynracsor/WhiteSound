@@ -1,0 +1,5 @@
+# Shell scripts and desktop entries must keep LF endings on every checkout,
+# otherwise the carriage returns break `sh installers/.../*.sh` on macOS/Linux
+# (and in WSL or Git Bash on Windows).
+*.sh text eol=lf
+*.desktop text eol=lf
