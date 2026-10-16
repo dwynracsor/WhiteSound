@@ -67,17 +67,6 @@ sh white-sound-<version>-linux-<arch>/install.sh --system # into /usr/local
 `--uninstall`. Installing the icon into the theme is what lets the desktop's tray
 host resolve the `IconName` the StatusNotifierItem advertises.
 
-On Windows, the same tarball can be produced from WSL (Ubuntu) without a separate
-Linux machine:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File installers\linux\build_linux_via_wsl.ps1
-```
-
-WSL2 must be enabled first (`wsl --install`, then reboot once). The script
-installs the build dependencies inside Ubuntu, builds, and writes the `.tar.gz`
-straight into this folder.
-
 ## Building in the cloud
 
 `installers/` → `.github/workflows/build-installers.yml` builds the macOS `.dmg`

@@ -146,10 +146,8 @@ warn on first run.
 macOS packages can only be built on macOS (they need the Apple SDK). If you do not
 have a Mac, the
 [`build-installers` workflow](.github/workflows/build-installers.yml) builds the
-`.dmg` (universal) and the Linux `.tar.gz` on GitHub's runners and publishes them
-as downloadable artifacts (Actions → Build installers → Run workflow). The Linux
-tarball can also be built on Windows through WSL with
-`installers\linux\build_linux_via_wsl.ps1`. See
+`.dmg` (universal) **and** the Linux `.tar.gz` on GitHub's runners and publishes
+them as downloadable artifacts (Actions → Build installers → Run workflow). See
 [`installers/README.md`](installers/README.md) for the details.
 
 ## Usage
