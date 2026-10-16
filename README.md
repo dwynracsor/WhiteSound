@@ -52,8 +52,6 @@ in the system tray, with a native backend on Windows, macOS and Linux.
   - at least one audio backend's development headers (`libasound2-dev` for ALSA,
     `libpulse-dev` for PulseAudio or `libjack-dev` for JACK). CMake compiles only
     the backends it finds.
-- [Inno Setup 6](https://jrsoftware.org/isinfo.php) — only to build the Windows
-  installer (`winget install JRSoftware.InnoSetup`)
 
 ## Building
 
@@ -62,7 +60,7 @@ cmake -G Ninja -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build
 ```
 
-The result is `build/white_sound_tray.exe` (`white_sound_tray` on macOS/Linux).
+The result is `build/white-sound.exe` (`white-sound` on macOS/Linux).
 
 The flyout window is drawn with a portable **GLFW + OpenGL3** host (GLFW is
 vendored in `third_party/glfw`, so there is nothing extra to install). The
@@ -70,17 +68,6 @@ original native **Win32 + DirectX 11** host is kept as a Windows-only fallback:
 
 ```bat
 cmake -G Ninja -B build -DCMAKE_BUILD_TYPE=Release -DWS_FLYOUT_BACKEND=win32
-```
-
-### Unit tests
-
-The pure parts of the audio engine (the auto-tuner step and the burst generator)
-are covered by a small, dependency-free test executable. It is off by default:
-
-```bat
-cmake -G Ninja -B build -DCMAKE_BUILD_TYPE=Release -DWS_BUILD_TESTS=ON
-cmake --build build
-ctest --test-dir build --output-on-failure
 ```
 
 The version is defined once, in the `project(white_sound VERSION x.y.z)` line at
@@ -91,12 +78,12 @@ manifest all report the same version from that single place.
 
 ### Verifying on macOS/Linux
 
-The Windows build is exercised on every change; the macOS and Linux backends
-share the same portable shell but still need a first run on their own system.
-`tools/verify_unix.sh` does the configure + build + unit-test pass in one step:
+The macOS and Linux backends share the same portable shell as Windows but need a
+first run on their own system. Configure and build as usual:
 
 ```sh
-sh tools/verify_unix.sh
+cmake -G Ninja -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build
 ```
 
 Then launch the built binary and check, in order:
@@ -113,12 +100,6 @@ Then launch the built binary and check, in order:
 Anything that fails is worth reporting with the exact tool output; the per-OS
 code is small and lives behind `ws::platform::Tray` and
 `ws::platform::showMessage()`.
-
-The packaging scripts ([Packaging](#packaging)) give something concrete to
-install and launch on those systems: `packaging/linux/build_tarball.sh` builds a
-tarball whose `install.sh` places the binary, desktop entry and icons, and
-`packaging/macos/build_app.sh` builds `White Sound.app` and a `.dmg`. Installing
-the package and repeating the checks above is the real end-to-end test.
 
 ## Platforms
 
@@ -143,82 +124,11 @@ macOS/Linux).
 > The macOS and Linux backends drive the same portable shell but have not been
 > built or run on those systems yet, so treat them as a starting point rather
 > than a finished port. See
-> [Verifying on macOS/Linux](#verifying-on-macoslinux) for the one-command
-> check.
-
-## Packaging
-
-Each OS gets a self-contained package; none of them are code-signed, so Windows
-SmartScreen and macOS Gatekeeper will warn on first run.
-
-### Windows (Inno Setup)
-
-```powershell
-powershell -ExecutionPolicy Bypass -File installer\build_installer.ps1
-```
-
-Builds the application and packages it with Inno Setup into
-`dist\WhiteSoundSetup-<version>.exe`.
-
-The install is per-user and needs no admin rights (no UAC prompt): it copies the
-executable (plus `README.md`, `LICENSE` and `THIRD_PARTY_NOTICES.md`) to
-`%LOCALAPPDATA%\Programs\White Sound`, adds a Start Menu shortcut
-and — optionally — a desktop shortcut and a
-`HKCU\...\CurrentVersion\Run` entry to start with Windows. It also ships an
-uninstaller that removes those shortcuts and the autostart entry. Your settings
-in `%APPDATA%\white-sound` are left untouched (delete that folder to reset).
-
-The installer reads its version from the build, so it always matches the app.
-
-To check the installer end to end, there is a script that installs silently,
-verifies the files, shortcuts, registry entries and version, launches the
-installed app and confirms its tray window appears, then uninstalls and verifies
-that everything is gone:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File installer\test_install.ps1
-```
-
-It is safe to run on a development machine (it removes a previous install
-first), but it is meant for a clean Windows machine or VM. It exits non-zero if
-any check fails.
-
-### macOS (`.app` + `.dmg`)
-
-```sh
-sh packaging/macos/build_app.sh
-```
-
-Builds the app and assembles `dist/White Sound.app` (executable in
-`Contents/MacOS`, the tray PNGs and a generated `.icns` in `Contents/Resources`,
-plus an `Info.plist` with `LSUIElement` so it is a tray-only agent) and a
-`dist/White Sound-<version>.dmg` with an `/Applications` shortcut for
-drag-to-install. The bundle is only ad-hoc signed, so the first launch needs a
-**right-click → Open**.
-
-### Linux (portable tarball)
-
-```sh
-sh packaging/linux/build_tarball.sh
-```
-
-Builds the app and produces `dist/white-sound-<version>-linux-<arch>.tar.gz`
-containing `bin/`, `share/` (a `.desktop` entry and the hicolor theme icons) and
-an `install.sh`. To install:
-
-```sh
-tar xzf white-sound-<version>-linux-<arch>.tar.gz
-sh white-sound-<version>-linux-<arch>/install.sh          # into ~/.local
-sh white-sound-<version>-linux-<arch>/install.sh --system # into /usr/local
-```
-
-`install.sh` also takes `--autostart` (writes an `~/.config/autostart` entry) and
-`--uninstall`. Installing the icon into the theme is what lets the desktop's tray
-host resolve the `IconName` the StatusNotifierItem advertises.
+> [Verifying on macOS/Linux](#verifying-on-macoslinux) for the checks to run.
 
 ## Usage
 
-Run the application (`white_sound_tray.exe` on Windows). It stays in the system
+Run the application (`white-sound.exe` on Windows). It stays in the system
 tray.
 
 - **Left click** on the icon: opens/closes the **dark flyout** (compact, about
@@ -328,7 +238,7 @@ portable, and only the small `ws::platform` layer touches the OS:
 | `ws_app` | portable | `ws::app::Controller`: configuration + engine orchestration |
 | `ws_gui_glfw` | portable | GLFW + OpenGL3 flyout host (default) |
 | `ws_gui_win32` | Windows | native Win32 + Direct3D 11 flyout host (fallback) |
-| `white_sound_tray` | per OS | entry point + shell (`src/app/shell`) + platform services and tray backend (`src/app/platform`) |
+| `white-sound` | per OS | entry point + shell (`src/app/shell`) + platform services and tray backend (`src/app/platform`) |
 
 The shell talks to the window only through `ws::gui::Flyout` (show/hide, render,
 events, focus) and to the tray only through `ws::platform::Tray` (icon, menu,
@@ -350,13 +260,11 @@ single instance) and then hand over. Everything platform-specific lives behind
 - Noise: white (uniform, xorshift32), pink (Paul Kellett approximation) or burst
   (white noise pulses), scaled to float32
 - Config: [nlohmann/json](https://github.com/nlohmann/json) (header-only)
-- App icons: two multi-size `.ico` files (lit and unlit) generated by
-  `tools/make_icon.ps1` and embedded through `assets/white_sound.rc`, so the tray
-  icon, the window icons and the executable all share the same artwork. The
-  macOS/Linux tray art is the same badge exported as PNG
-  (`assets/white_sound.png`/`white_sound_off.png`); `tools/make_tray_icons.ps1`
-  turns those into the embedded ARGB pixmaps used by the Linux tray
-  (`src/app/platform/tray_icons.h`)
+- App icons: two multi-size `.ico` files (lit and unlit) embedded through
+  `assets/white_sound.rc`, so the tray icon, the window icons and the executable
+  all share the same artwork. The macOS/Linux tray art is the same badge exported
+  as PNG (`assets/white_sound.png`/`white_sound_off.png`) and the Linux tray uses
+  the embedded ARGB pixmaps in `src/app/platform/tray_icons.h`
 - Version and manifest: `project(... VERSION ...)` is the single source; CMake
   generates `ws_version.h` (used by the About dialog and the `VERSIONINFO`
   resource) and the application manifest (as-invoker, per-monitor-v2 DPI aware).

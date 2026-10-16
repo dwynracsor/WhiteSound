@@ -1,7 +1,0 @@
-# Shell scripts must keep LF endings even on Windows checkouts, otherwise the
-# carriage returns break `sh tools/verify_unix.sh` on macOS/Linux (and in WSL).
-*.sh text eol=lf
-
-# Freedesktop desktop entries must also stay LF (they are read by the Linux
-# desktop, and the @EXEC@ placeholder is rewritten by install.sh).
-*.desktop text eol=lf

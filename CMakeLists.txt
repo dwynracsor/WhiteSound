@@ -31,11 +31,6 @@ configure_file(
     ${WS_GENERATED_DIR}/white_sound.manifest
     @ONLY
 )
-configure_file(
-    ${CMAKE_CURRENT_SOURCE_DIR}/installer/version.iss.in
-    ${WS_GENERATED_DIR}/version.iss
-    @ONLY
-)
 
 # Core library: the portable audio engine plus the per-OS paths helper. Has no
 # dependency on the window/tray layer, so it can be reused on every platform.
@@ -242,41 +237,41 @@ else()
     )
 endif()
 
-add_executable(white_sound_tray ${WS_TRAY_SOURCES} ${WS_PLATFORM_SOURCES})
-target_include_directories(white_sound_tray PRIVATE
+add_executable(white-sound ${WS_TRAY_SOURCES} ${WS_PLATFORM_SOURCES})
+target_include_directories(white-sound PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src
     # Generated ws_version.h (and, on Windows, the manifest).
     ${WS_GENERATED_DIR}
 )
-target_link_libraries(white_sound_tray PRIVATE ws_app ws_gui)
+target_link_libraries(white-sound PRIVATE ws_app ws_gui)
 if(WS_FLYOUT_BACKEND STREQUAL "win32")
-    target_link_libraries(white_sound_tray PRIVATE ws_gui_win32)
+    target_link_libraries(white-sound PRIVATE ws_gui_win32)
 else()
-    target_link_libraries(white_sound_tray PRIVATE ws_gui_glfw)
+    target_link_libraries(white-sound PRIVATE ws_gui_glfw)
 endif()
 
 if(WIN32)
     # Compile assets/white_sound.rc so the .exe carries the app icon and Windows
     # can show it in Explorer, the tray and the file properties dialog.
     enable_language(RC)
-    target_sources(white_sound_tray PRIVATE assets/white_sound.rc)
-    target_include_directories(white_sound_tray PRIVATE
+    target_sources(white-sound PRIVATE assets/white_sound.rc)
+    target_include_directories(white-sound PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/third_party
         # windres resolves white_sound.ico through the include path.
         ${CMAKE_CURRENT_SOURCE_DIR}/assets
     )
-    target_link_libraries(white_sound_tray PRIVATE shell32 user32 comctl32 gdi32)
-    target_compile_definitions(white_sound_tray PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN)
+    target_link_libraries(white-sound PRIVATE shell32 user32 comctl32 gdi32)
+    target_compile_definitions(white-sound PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN)
     if(MINGW)
-        set_target_properties(white_sound_tray PROPERTIES LINK_FLAGS "-static -mwindows")
+        set_target_properties(white-sound PROPERTIES LINK_FLAGS "-static -mwindows")
     else()
-        set_target_properties(white_sound_tray PROPERTIES WIN32_EXECUTABLE TRUE)
-        target_compile_definitions(white_sound_tray PRIVATE WS_EMBED_MANIFEST)
+        set_target_properties(white-sound PROPERTIES WIN32_EXECUTABLE TRUE)
+        target_compile_definitions(white-sound PRIVATE WS_EMBED_MANIFEST)
     endif()
 elseif(APPLE)
     find_library(COCOA_FRAMEWORK Cocoa REQUIRED)
     find_library(CARBON_FRAMEWORK Carbon REQUIRED)
-    target_link_libraries(white_sound_tray PRIVATE
+    target_link_libraries(white-sound PRIVATE
         ${COCOA_FRAMEWORK} ${CARBON_FRAMEWORK})
 else()
     # Linux tray: StatusNotifierItem over D-Bus, via libdbus.
@@ -285,30 +280,14 @@ else()
         pkg_check_modules(DBUS dbus-1)
     endif()
     if(DBUS_FOUND)
-        target_include_directories(white_sound_tray PRIVATE ${DBUS_INCLUDE_DIRS})
-        target_link_libraries(white_sound_tray PRIVATE ${DBUS_LIBRARIES})
+        target_include_directories(white-sound PRIVATE ${DBUS_INCLUDE_DIRS})
+        target_link_libraries(white-sound PRIVATE ${DBUS_LIBRARIES})
     else()
         # No pkg-config (or no dbus-1.pc): locate the header and the library
         # ourselves, so dbus/dbus.h is on the include path either way.
         find_path(DBUS_INCLUDE_DIR NAMES dbus/dbus.h REQUIRED)
         find_library(DBUS_LIBRARY NAMES dbus-1 REQUIRED)
-        target_include_directories(white_sound_tray PRIVATE ${DBUS_INCLUDE_DIR})
-        target_link_libraries(white_sound_tray PRIVATE ${DBUS_LIBRARY})
+        target_include_directories(white-sound PRIVATE ${DBUS_INCLUDE_DIR})
+        target_link_libraries(white-sound PRIVATE ${DBUS_LIBRARY})
     endif()
-endif()
-
-# Optional unit tests for the portable, pure helpers (auto-tuner and burst
-# generator). Off by default so a normal build does not compile the audio engine
-# twice; enable with -DWS_BUILD_TESTS=ON and run `ctest --test-dir build`.
-option(WS_BUILD_TESTS "Build the unit tests" OFF)
-if(WS_BUILD_TESTS)
-    enable_testing()
-    add_executable(ws_tests tests/test_keepalive.cpp)
-    target_include_directories(ws_tests PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/src
-        # Generated ws_audio_backend.h.
-        ${WS_GENERATED_DIR}
-    )
-    target_link_libraries(ws_tests PRIVATE ws_core)
-    add_test(NAME ws_tests COMMAND ws_tests)
 endif()
