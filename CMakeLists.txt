@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(white_sound VERSION 1.0.0 LANGUAGES CXX)
+project(white_sound VERSION 1.1.0 LANGUAGES CXX)
 
 # Objective-C++ is required for the macOS tray (NSStatusItem) and the macOS
 # platform services, which are .mm sources. Without this, no enabled language
