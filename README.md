@@ -20,17 +20,33 @@ in the system tray, with a native backend on Windows, macOS and Linux.
   PulseAudio/ALSA/JACK (Linux; PipeWire is reached through its PulseAudio or ALSA
   compatibility layer)
 - **Adjustable noise level** (`0.002` by default ≈ -54 dBFS)
-- **Selectable noise type**: white (default), pink or burst. White spreads its
-  energy across the whole band, so a small BT speaker —which rolls off the low
-  end— receives more useful signal to stay awake. **Burst** mode does not emit
-  continuous noise: it fires a short noise pulse every few seconds, which is
-  usually more effective (and less audible) when continuous noise does not stop
-  the amplifier from sleeping
-- **Level auto-tune**: if it detects drop-outs (the stream falls over or gets
-  reconfigured), it raises the level automatically up to a ceiling and brings it
-  down slowly while stable, so it never gets dirtier than needed. The level never
-  goes below the **learned floor** (the one needed to survive the last drop-out),
-  so it does not fall back into the "sleep → raise → lower" cycle
+- **Selectable noise type**: white (default), pink, burst, speech band, low band or
+  tone. White spreads its energy across the whole band, so a small BT speaker
+  —which rolls off the low end— receives more useful signal to stay awake.
+  **Burst** mode does not emit continuous noise: it fires a short noise pulse
+  every few seconds, which is usually more effective (and less audible) when
+  continuous noise does not stop the amplifier from sleeping. The three
+  band-limited modes are probes for the case where the *speaker's own DSP* (not
+  the amplifier) is the problem — it drops or clips the first syllable of each
+  phrase because it does not see the signal it expects: **speech band** confines
+  the noise to the voice range (300–3400 Hz), **low band** is a bass-only fill
+  (45–130 Hz) that a small driver barely reproduces and **tone** is a steady sine
+  at a frequency you pick, to sweep the spectrum and find what the speaker reacts
+  to
+- **Level auto-tune**: raises the level automatically if it detects drop-outs (the
+  stream falls over or gets reconfigured), holds the raised level for a while and
+  then eases it back down towards the level you set — never below it, so a fill
+  that keeps a speaker from clipping words stays put. While it is on, the volume
+  slider and the dB readout follow the level it settles on, and the level you set
+  is shown as `(set … dBFS)` next to the checkbox; touching the slider, or using
+  **Quieter -3 dB** / **Stronger +3 dB**, takes over from it
+- **Volume remembered per noise type**: switching noise type restores the level
+  that was tuned for it, so a level that works for one fill does not have to be
+  re-found after trying another. Two buttons under the slider — **Quieter -3 dB**
+  and **Stronger +3 dB** — nudge the level, which is the one thing the engine
+  cannot work out on its own (it cannot hear whether the *speaker's* DSP is still
+  clipping the first syllable of a word). The level is also capped per noise type
+  so the fill can never reach full scale and distort
 - **Output device selection** by index or default
 
 ## Requirements
@@ -163,6 +179,12 @@ tray.
     to the tray — the panel hides, the app keeps running and (on Windows) drops
     off the taskbar; a following **✕**, or **Exit** in the tray menu, exits for
     good and stops emitting
+  - **Taskbar entry**: on Windows the app puts a taskbar button up when it is
+    launched. **–** (and clicking away) just minimizes the panel the normal way,
+    so the button stays and the panel can be restored from it; **✕** is what takes
+    the button off the taskbar and leaves the app in the tray only. Once closed
+    that way, opening the panel again from the tray (or the hotkey) does not bring
+    the button back — it returns on the next launch
   - Status lamp (active/inactive) next to the label: the app icon drawn as a
     little bulb that lights up in blue with a soft halo while emitting, and stays
     as a dark unlit LED when disabled. It switches on as the panel opens and
@@ -172,17 +194,31 @@ tray.
   - **Device selector** (includes "Default")
   - **Volume slider** in dBFS (perceptual scale; adjusts the level live). The
     mouse wheel also works over the slider (±2 dB per notch). It warns when the
-    level is so low that it may cause drop-outs
-  - **Noise type**: White, Pink or Burst. With Burst, two sliders appear for the
-    pulse length and the interval between pulses
-  - **Auto-tune**: raises the level only when it detects drop-outs; shows the
-    effective level once it has adjusted it
+    level is so low that it may cause drop-outs, and when it has been limited
+    because the active noise type would otherwise hit full scale. With
+    **Auto-tune** on, the slider tracks the level the engine is actually using,
+    so the dB readout moves when the auto-tuner adjusts it
+  - **Quieter -3 dB** / **Stronger +3 dB**: one-click nudges of the level for the
+    active noise type, the only feedback the engine cannot produce on its own
+    (it cannot hear whether the speaker is still clipping words). The level is
+    remembered per noise type
+  - **Noise type**: White, Pink, Burst, Speech band, Low band or Tone. With
+    Burst, two sliders appear for the pulse length and the interval between
+    pulses; with Tone, one slider picks the frequency (20 Hz–8 kHz, logarithmic).
+    Pointing at the box, or at an entry once the list is open, explains that one
+    type only (the list itself stays free of explanations)
+  - **Auto-tune**: raises the level on its own only when it detects drop-outs, then
+    eases it back towards the level you set (never below it). The slider and the dB
+    readout show the level in use; the level you set is shown next to the checkbox
+  - **Brand mark**: the wave logo in its unlit (grey) state with *White Sound
+    Project ©* sits small and dim in the bottom-right corner of the panel
   - **Moving the window**: drag from the top bar (the strip with the window
     buttons) or from the header. Only that bar lights up on hover (when you are
     not over a button), so the status text, the Turn off button and the device
     name keep their normal look. The window remembers where you left it and
     reopens there; to reopen it next to the cursor, **double click** the header
-  - It closes on losing focus or with `Esc`
+  - It closes on losing focus or with `Esc` (with the noise type list open, the
+    first `Esc` closes the list and the next one closes the panel)
 - **Right click** on the icon: context menu
   - **Open panel**: opens the flyout
   - **Enabled**: turns emission on/off
@@ -209,25 +245,38 @@ The configuration file is JSON:
   "deviceIndex": -1,
   "level": 0.005,
   "autoTune": true,
-  "maxLevel": 0.02,
+  "maxLevel": 0.06,
   "noiseMode": 0,
   "burstDurationMs": 200,
   "burstIntervalMs": 2000,
-  "enabled": true
+  "toneHz": 1000,
+  "enabled": true,
+  "levelsByMode": [0.005, 0, 0, 0, 0.031, 0]
 }
 ```
 
 - `deviceIndex`: `-1` = default device, or the device index
 - `level`: noise amplitude (0.0 to 1.0; `0.002` ≈ -54 dBFS). This is the
-  starting/base level the auto-tuner uses.
+  starting/base level the auto-tuner uses. It is the level of the **active**
+  noise mode; the rest are kept in `levelsByMode`.
 - `autoTune`: `true` = raises the level automatically on drop-outs (default)
-- `maxLevel`: ceiling the auto-tuner may reach (`0.02` by default ≈ -34 dBFS)
-- `noiseMode`: `0` = white noise (default), `1` = pink noise, `2` = burst
+- `maxLevel`: ceiling the auto-tuner may reach (`0.06` by default ≈ -24 dBFS).
+  It is additionally clamped to the highest level the active noise type can play
+  without hitting full scale
+- `noiseMode`: `0` = white noise (default), `1` = pink noise, `2` = burst,
+  `3` = speech band (300–3400 Hz), `4` = low band (bass, 45–130 Hz),
+  `5` = tone (sine)
 - `burstDurationMs`: length of each noise pulse in burst mode (`200` by default)
 - `burstIntervalMs`: interval between pulses in burst mode (`2000` by default)
+- `toneHz`: tone frequency in tone mode (`1000` by default, clamped to
+  20–15000)
 - `enabled`: `true` = start emitting at launch (default), `false` = start idle in
   the tray. Toggling **Turn on/Turn off** (or **Enabled** in the tray menu)
   updates it, so the app reopens in the state you left it
+- `levelsByMode`: the level tuned for each noise mode, indexed like `noiseMode`
+  (`0` = never tuned, in which case the current `level` is used). Switching noise
+  type in the flyout saves the level of the mode being left and restores the one
+  for the mode being entered
 
 Default path, per OS:
 
@@ -245,10 +294,11 @@ size, whether auto-routing is used, and every watchdog notification/restart. The
 flyout shows the device actually opened in the header, below the status indicator
 (and the sample rate below the selector).
 
-With `autoTune` enabled, every detected drop-out and every level adjustment is
-logged, e.g. `autotune: 2 drop-out(s) -> level 0.002 -> 0.0045`. The flyout shows
-the effective level (`Auto: -47 dBFS`) when the tuner has raised it above the
-base level.
+With `autoTune` enabled, every detected drop-out is logged, e.g.
+`autotune: 2 drop-out(s) -> level 0.002 -> 0.0045`, and the slow return is logged
+at most every 30 s (`autotune: settling -> level …`). The volume slider and the
+dB readout in the flyout show the level in use, and the level you set appears as
+`(set … dBFS)` next to the checkbox whenever the tuner has moved it.
 
 ## Architecture
 
@@ -282,8 +332,14 @@ single instance) and then hand over. Everything platform-specific lives behind
   `MA_ENABLE_*`) and generates the name the About dialog reports
 - Tray: `Shell_NotifyIcon` (Windows), `NSStatusItem` + `NSMenu` (macOS),
   StatusNotifierItem + DBusMenu over libdbus (Linux)
-- Noise: white (uniform, xorshift32), pink (Paul Kellett approximation) or burst
-  (white noise pulses), scaled to float32
+- Noise: white (uniform, xorshift32), pink (Paul Kellett approximation), burst
+  (white noise pulses), speech band (band-passed noise, 300–3400 Hz), low band
+  (band-passed noise, 45–130 Hz, the low window a speaker's DSP tends to gate on)
+  or tone (sine), scaled to float32. The band-limited modes run through RBJ
+  biquads (recomputed only when the mode or the sample rate changes) and get a
+  measured makeup gain so the volume slider means about the same loudness in
+  every mode; the applied gain is smoothed over ~20 ms so changing the volume or
+  the mode does not click
 - Config: [nlohmann/json](https://github.com/nlohmann/json) (header-only)
 - App icons: two multi-size `.ico` files (lit and unlit) embedded through
   `assets/white_sound.rc`, so the tray icon, the window icons and the executable
@@ -303,6 +359,34 @@ single instance) and then hand over. Everything platform-specific lives behind
 - Set the volume conservatively (`0.002` ≈ -54 dBFS) if you notice hiss or
   drop-outs.
 - The level changes live without restarting the stream.
+
+## Speaker clips the start of each word
+
+Some Bluetooth speakers (small, cheap models with an aggressive internal DSP)
+cut or mute the first syllable of every phrase during speech, podcasts or sports:
+with only mid-band content and silence between words the speaker's DSP treats the
+gap as "no signal" and shuts a gate or limiter, so the next word loses its attack.
+This is a limitation of the speaker's firmware — the app cannot change it — but it
+can feed the speaker the signal its DSP is looking for.
+
+1. Keep the app emitting into the same output device the podcast uses.
+2. **Turn off Auto-tune** so the level stops drifting back down.
+3. Pick **Tone** and sweep the frequency between 40 Hz and 4 kHz while a podcast
+   plays. The band where the clipping stops tells you what the speaker listens
+   for.
+4. Switch to the matching mode — **Low band** if the low end stopped it,
+   **Speech band** if it was the voice range — and raise the level with the volume
+   slider until the words are complete. **Turn Auto-tune** back on afterwards if
+   you want it, but leave the level above the threshold that worked.
+
+**Measured case:** on a ZEALOT S32 the clipping stopped only between 60 Hz and
+100 Hz, so its gate is keyed on the low end. With **Low band** (45–130 Hz) the
+speaker is fed exactly that window: the fill lands where the DSP is listening and,
+because the driver is small, it is hardly audible. White or pink noise at a
+listenable level never reaches enough bass energy to hold the gate open — the
+white fill at -52 dBFS put roughly 38 dB less energy into 60–100 Hz than the tone
+that fixed it. Set the slider around **-31 dBFS** in low band mode to match that
+tone's energy; the mode only starts to clip above about -7 dBFS.
 
 ## License
 

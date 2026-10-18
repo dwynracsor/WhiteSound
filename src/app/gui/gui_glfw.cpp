@@ -205,6 +205,13 @@ public:
     bool renderFrame() override {
         if (!m_ready || !m_window) return false;
 
+        // Read the popup state before NewFrame handles the key: when a list (the
+        // noise type combo) is open, Escape closes the list and must not also
+        // hide the panel. A second press, with no list open, hides it as usual.
+        const ImGuiPopupFlags anyPopup =
+            ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel;
+        const bool popupWasOpen = ImGui::IsPopupOpen(nullptr, anyPopup);
+
         ImGui_ImplOpenGL3_NewFrame();
         ImGui_ImplGlfw_NewFrame();
         ImGui::NewFrame();
@@ -212,7 +219,7 @@ public:
         const bool changed = m_model ? ws::gui::drawFlyout(*m_model) : false;
         updateDrag();
 
-        const bool wantHide = ImGui::IsKeyPressed(ImGuiKey_Escape, false);
+        const bool wantHide = !popupWasOpen && ImGui::IsKeyPressed(ImGuiKey_Escape, false);
 
         ImGui::Render();
         int fbW = 0, fbH = 0;

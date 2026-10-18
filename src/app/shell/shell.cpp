@@ -181,12 +181,18 @@ void Shell::showPanel() {
     m_controller->syncModel(m_model);
     ws::gui::refreshDevices(m_model);
     m_model.bulbLit = 0.0f;
-    if (m_trayOk) m_tray->setTaskbarVisible(true);
+    // The taskbar entry is only put up when the app starts (the tray window is
+    // created with WS_EX_APPWINDOW), so reopening the panel from the tray does
+    // not bring it back: once the panel is closed, the app lives in the tray
+    // only until the next launch.
     m_flyout->showNearCursor();
 }
 
 void Shell::requestClose() {
     if (m_closeCount++ == 0) {
+        // The close button is the only thing that takes the app off the taskbar:
+        // minimising (or clicking away) just hides the panel like a normal
+        // window, keeping the taskbar entry there to restore it from.
         if (m_flyout) m_flyout->hide();
         if (m_trayOk) m_tray->setTaskbarVisible(false);
         m_focusLost = false;
@@ -228,13 +234,26 @@ void Shell::showConfig() const {
     msg += (m_controller->enabled() ? "on" : "off");
     msg += "\nLevel: " + std::to_string(cfg.level);
     msg += "\nNoise: ";
-    if (cfg.noiseMode == 1) {
-        msg += "pink";
-    } else if (cfg.noiseMode == 2) {
-        msg += "burst (" + std::to_string(cfg.burstDurationMs) + " ms every " +
-               std::to_string(cfg.burstIntervalMs) + " ms)";
-    } else {
-        msg += "white";
+    switch (ws::clampNoiseMode(cfg.noiseMode)) {
+        case ws::NoisePink:
+            msg += "pink";
+            break;
+        case ws::NoiseBurst:
+            msg += "burst (" + std::to_string(cfg.burstDurationMs) + " ms every " +
+                   std::to_string(cfg.burstIntervalMs) + " ms)";
+            break;
+        case ws::NoiseSpeechBand:
+            msg += "speech band (300-3400 Hz)";
+            break;
+        case ws::NoiseLowBand:
+            msg += "low band (45-130 Hz)";
+            break;
+        case ws::NoiseTone:
+            msg += "tone (" + std::to_string(cfg.toneHz) + " Hz)";
+            break;
+        default:
+            msg += "white";
+            break;
     }
     msg += "\nAuto-tune: ";
     msg += (cfg.autoTune ? "on" : "off");

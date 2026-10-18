@@ -25,6 +25,7 @@ ws::Settings Controller::makeSettings() const {
     s.noiseMode       = m_config.noiseMode;
     s.burstDurationMs = m_config.burstDurationMs;
     s.burstIntervalMs = m_config.burstIntervalMs;
+    s.toneHz          = m_config.toneHz;
     return s;
 }
 
@@ -45,17 +46,38 @@ void Controller::load() {
             if (j.contains("noiseMode")) m_config.noiseMode = j["noiseMode"].get<int>();
             if (j.contains("burstDurationMs")) m_config.burstDurationMs = j["burstDurationMs"].get<int>();
             if (j.contains("burstIntervalMs")) m_config.burstIntervalMs = j["burstIntervalMs"].get<int>();
+            if (j.contains("toneHz")) m_config.toneHz = j["toneHz"].get<int>();
             if (j.contains("enabled")) m_config.enabled = j["enabled"].get<bool>();
 
             if (m_config.level < 0.0f) m_config.level = 0.0f;
             if (m_config.level > 1.0f) m_config.level = 1.0f;
             if (m_config.maxLevel <= 0.0f) m_config.maxLevel = 0.02f;
             if (m_config.maxLevel > 1.0f) m_config.maxLevel = 1.0f;
-            if (m_config.noiseMode != 0 && m_config.noiseMode != 1 && m_config.noiseMode != 2) m_config.noiseMode = 0;
+            m_config.noiseMode = ws::clampNoiseMode(m_config.noiseMode);
             if (m_config.burstDurationMs < 10) m_config.burstDurationMs = 10;
             if (m_config.burstDurationMs > 10000) m_config.burstDurationMs = 10000;
             if (m_config.burstIntervalMs < 100) m_config.burstIntervalMs = 100;
             if (m_config.burstIntervalMs > 60000) m_config.burstIntervalMs = 60000;
+            if (m_config.toneHz < 20) m_config.toneHz = 20;
+            if (m_config.toneHz > 15000) m_config.toneHz = 15000;
+
+            if (j.contains("levelsByMode") && j["levelsByMode"].is_array()) {
+                const auto &levels = j["levelsByMode"];
+                for (int i = 0; i < ws::kNoiseModeCount && i < static_cast<int>(levels.size()); ++i) {
+                    if (levels[i].is_number()) {
+                        float v = levels[i].get<float>();
+                        if (v < 0.0f) v = 0.0f;
+                        if (v > 1.0f) v = 1.0f;
+                        m_config.levelByMode[i] = v;
+                    }
+                }
+            }
+
+            // Start at whatever level was tuned for the active noise mode.
+            const int mode = ws::clampNoiseMode(m_config.noiseMode);
+            if (m_config.levelByMode[mode] > 0.0f) {
+                m_config.level = m_config.levelByMode[mode];
+            }
         } catch (...) {}
     }
 
@@ -102,26 +124,48 @@ void Controller::syncModel(ws::gui::GuiModel &model) const {
     model.settings.noiseMode = m_config.noiseMode;
     model.settings.burstDurationMs = m_config.burstDurationMs;
     model.settings.burstIntervalMs = m_config.burstIntervalMs;
+    model.settings.toneHz = m_config.toneHz;
     model.enabled = m_enabled;
     model.backend = ws::getBackendName();
 }
 
 bool Controller::applyGuiChanges(const ws::gui::GuiModel &model) {
+    const int   prevMode  = m_config.noiseMode;
+    const float prevLevel = m_config.level;
+
     const bool enableChanged = (model.enabled != m_enabled);
     const bool deviceChanged = (model.settings.deviceIndex != m_config.deviceIndex);
     const bool autoChanged   = (model.settings.autoTune != m_config.autoTune);
-    const bool noiseChanged  = (model.settings.noiseMode != m_config.noiseMode ||
+    const bool modeChanged   = (model.settings.noiseMode != prevMode);
+    const bool noiseChanged  = (modeChanged ||
                                 model.settings.burstDurationMs != m_config.burstDurationMs ||
-                                model.settings.burstIntervalMs != m_config.burstIntervalMs);
+                                model.settings.burstIntervalMs != m_config.burstIntervalMs ||
+                                model.settings.toneHz != m_config.toneHz);
 
     m_config.enabled         = model.enabled;
     m_config.deviceIndex     = model.settings.deviceIndex;
-    m_config.level           = model.settings.level;
     m_config.autoTune        = model.settings.autoTune;
     m_config.maxLevel        = model.settings.maxLevel;
     m_config.noiseMode       = model.settings.noiseMode;
     m_config.burstDurationMs = model.settings.burstDurationMs;
     m_config.burstIntervalMs = model.settings.burstIntervalMs;
+    m_config.toneHz          = model.settings.toneHz;
+
+    // The volume is remembered per noise mode: the level tuned for the mode we
+    // are leaving is stored, and the level tuned for the one we are entering is
+    // restored (or the current one, if that mode was never tuned). This is what
+    // makes the level feel automatic when switching noise types.
+    if (modeChanged) {
+        m_config.levelByMode[ws::clampNoiseMode(prevMode)] = model.settings.level;
+        const int entering = ws::clampNoiseMode(model.settings.noiseMode);
+        m_config.level = (m_config.levelByMode[entering] > 0.0f)
+                             ? m_config.levelByMode[entering]
+                             : model.settings.level;
+    } else {
+        m_config.level = model.settings.level;
+    }
+
+    const bool levelChanged = (m_config.level != prevLevel);
 
     if (enableChanged) {
         m_enabled = model.enabled;
@@ -138,17 +182,25 @@ bool Controller::applyGuiChanges(const ws::gui::GuiModel &model) {
         if (!m_engine->start(makeSettings())) {
             m_host->showError("Failed to start", m_engine->lastError());
         }
-    } else if (autoChanged) {
-        m_engine->setAutoTune(m_config.autoTune);
-    } else if (noiseChanged) {
-        m_engine->setNoiseMode(m_config.noiseMode);
-        m_engine->setBurstDuration(m_config.burstDurationMs);
-        m_engine->setBurstInterval(m_config.burstIntervalMs);
     } else {
-        m_engine->setLevel(m_config.level);
+        // Every live setting is applied, so two changes in the same frame (for
+        // example dragging the tone frequency and the volume together) do not
+        // lose one of them.
+        if (autoChanged) {
+            m_engine->setAutoTune(m_config.autoTune);
+        }
+        if (noiseChanged) {
+            m_engine->setNoiseMode(m_config.noiseMode);
+            m_engine->setBurstDuration(m_config.burstDurationMs);
+            m_engine->setBurstInterval(m_config.burstIntervalMs);
+            m_engine->setToneHz(m_config.toneHz);
+        }
+        if (levelChanged) {
+            m_engine->setLevel(m_config.level);
+        }
     }
 
-    return enableChanged || deviceChanged || autoChanged || noiseChanged;
+    return enableChanged || deviceChanged || autoChanged || levelChanged || noiseChanged;
 }
 
 void Controller::save() const {
@@ -166,7 +218,17 @@ void Controller::save() const {
     j["noiseMode"] = m_config.noiseMode;
     j["burstDurationMs"] = m_config.burstDurationMs;
     j["burstIntervalMs"] = m_config.burstIntervalMs;
+    j["toneHz"] = m_config.toneHz;
     j["enabled"] = m_config.enabled;
+
+    // One level per noise mode, with the live level folded into the active mode
+    // so the file always reflects what is playing right now.
+    const int active = ws::clampNoiseMode(m_config.noiseMode);
+    json levels = json::array();
+    for (int i = 0; i < ws::kNoiseModeCount; ++i) {
+        levels.push_back((i == active) ? m_config.level : m_config.levelByMode[i]);
+    }
+    j["levelsByMode"] = levels;
 
     std::ofstream file(path);
     if (file.is_open()) {

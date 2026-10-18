@@ -71,7 +71,10 @@ constexpr float kBulbRampSeconds = 0.20f;
 constexpr float kBulbBreathPeriod = 2.5f;
 
 constexpr int kFlyoutW = 320;
-constexpr int kFlyoutH = 480;
+// Tall enough for the busiest layout (Burst, with its two extra sliders, plus the
+// "limited to ... dBFS" note and the auto-tune row) with room left for the brand
+// mark pinned to the bottom-right corner.
+constexpr int kFlyoutH = 508;
 
 } // namespace gui
 } // namespace ws

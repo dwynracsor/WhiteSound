@@ -35,6 +35,17 @@ inline void ws_set_verbose(bool v) {
 
 namespace ws {
 
+static const char *noiseModeName(int mode) {
+    switch (mode) {
+        case NoisePink:       return "pink";
+        case NoiseBurst:      return "burst";
+        case NoiseSpeechBand: return "speech-band";
+        case NoiseLowBand:    return "low-band";
+        case NoiseTone:       return "tone";
+        default:              return "white";
+    }
+}
+
 static void ws_diag_log(const std::string &msg) {
     static std::mutex s_logMtx;
     std::lock_guard<std::mutex> lock(s_logMtx);
@@ -84,14 +95,18 @@ struct KeepAlive::Impl {
 
     std::atomic<bool>          autoTune{true};
     std::atomic<float>         baseLevel{0.002f};
-    std::atomic<float>         maxLevel{0.02f};
+    std::atomic<float>         maxLevel{0.06f};
     std::atomic<float>         floorLevel{0.002f};
-    std::atomic<int>           noiseMode{0};
+    std::atomic<int>           noiseMode{NoiseWhite};
     std::atomic<int>           burstDurationMs{200};
     std::atomic<int>           burstIntervalMs{2000};
+    std::atomic<int>           toneHz{1000};
     std::atomic<std::uint64_t> burstSampleCounter{0};
     std::atomic<std::uint32_t> dropouts{0};
     std::chrono::steady_clock::time_point lastDropoutTime = std::chrono::steady_clock::now();
+    // While the floor eases back down the level changes every tick; log that at
+    // most now and then instead of once per second.
+    std::chrono::steady_clock::time_point lastSettleLog = std::chrono::steady_clock::now();
 
     std::string actualDeviceName;
     int         actualSampleRate   = 0;
@@ -143,13 +158,13 @@ struct KeepAlive::Impl {
                     beat = 0;
                     std::ostringstream ss;
                     const int nmode = noiseMode.load(std::memory_order_relaxed);
-                    std::string nstr = "white";
-                    if (nmode == 1) nstr = "pink";
-                    else if (nmode == 2) nstr = "burst";
                     ss << "heartbeat: level=" << pLevel->load(std::memory_order_relaxed)
                        << " floor=" << floorLevel.load(std::memory_order_relaxed)
                        << " running=" << (running.load() ? 1 : 0)
-                       << " noise=" << nstr;
+                       << " noise=" << noiseModeName(nmode);
+                    if (nmode == NoiseTone) {
+                        ss << " toneHz=" << toneHz.load(std::memory_order_relaxed);
+                    }
                     ws_diag_log(ss.str());
                 }
             }
@@ -193,6 +208,141 @@ static float generate_pink(float white, PinkState &ps) {
     return pink;
 }
 
+int clampNoiseMode(int mode) {
+    if (mode < NoiseWhite || mode > NoiseTone) return NoiseWhite;
+    return mode;
+}
+
+// Single-channel RBJ cookbook biquad. The noise source is mono and duplicated
+// to every channel, so one filter chain per stream is enough.
+struct Biquad {
+    float b0 = 1.0f, b1 = 0.0f, b2 = 0.0f, a1 = 0.0f, a2 = 0.0f;
+    float x1 = 0.0f, x2 = 0.0f, y1 = 0.0f, y2 = 0.0f;
+
+    void lowPass(float freq, float q, float fs) {
+        const float w0    = 6.28318530718f * freq / fs;
+        const float cw    = std::cos(w0);
+        const float alpha = std::sin(w0) / (2.0f * q);
+        const float a0    = 1.0f + alpha;
+        b0 = ((1.0f - cw) * 0.5f) / a0;
+        b1 = (1.0f - cw) / a0;
+        b2 = b0;
+        a1 = (-2.0f * cw) / a0;
+        a2 = (1.0f - alpha) / a0;
+    }
+
+    void highPass(float freq, float q, float fs) {
+        const float w0    = 6.28318530718f * freq / fs;
+        const float cw    = std::cos(w0);
+        const float alpha = std::sin(w0) / (2.0f * q);
+        const float a0    = 1.0f + alpha;
+        b0 = ((1.0f + cw) * 0.5f) / a0;
+        b1 = -(1.0f + cw) / a0;
+        b2 = b0;
+        a1 = (-2.0f * cw) / a0;
+        a2 = (1.0f - alpha) / a0;
+    }
+
+    void reset() { x1 = x2 = y1 = y2 = 0.0f; }
+
+    float process(float x) {
+        const float y = b0 * x + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2;
+        x2 = x1;
+        x1 = x;
+        y2 = y1;
+        y1 = y;
+        return y;
+    }
+};
+
+// Per-stream state for the band-limited modes: up to three cascaded biquads plus
+// the tone oscillator phase. Reconfigured only when the mode or the rate
+// changes, so the coefficients are not recomputed (and no transient is
+// generated) on every callback.
+struct ShapingState {
+    static constexpr int kMaxStages = 3;
+
+    int   mode       = -1;
+    float sampleRate = 0.0f;
+    int   stages     = 0;
+    Biquad f[kMaxStages];
+    float  tonePhase = 0.0f;
+
+    void configure(int m, float fs) {
+        mode       = m;
+        sampleRate = fs;
+        stages     = 0;
+        for (int i = 0; i < kMaxStages; ++i) f[i].reset();
+        tonePhase = 0.0f;
+        const float q = 0.70710678f;
+        if (m == NoiseSpeechBand) {
+            f[0].highPass(300.0f, q, fs);
+            f[1].lowPass(3400.0f, q, fs);
+            stages = 2;
+        } else if (m == NoiseLowBand) {
+            // 45-130 Hz: the low window a speaker's DSP was measured to key on
+            // (a ZEALOT S32 stopped clipping words only between 60 and 100 Hz).
+            // Rolled off above (twice, 24 dB/oct) to stay out of the voice band
+            // and the ear, and below so the driver is not pushed where it cannot
+            // move. ~89% of the fill lands between 50 and 150 Hz.
+            f[0].highPass(45.0f, q, fs);
+            f[1].lowPass(130.0f, q, fs);
+            f[2].lowPass(130.0f, q, fs);
+            stages = 3;
+        }
+    }
+
+    float process(float x, int m, int hz) {
+        if (m == NoiseSpeechBand || m == NoiseLowBand) {
+            for (int i = 0; i < stages; ++i) x = f[i].process(x);
+            return x;
+        }
+        if (m == NoiseTone) {
+            tonePhase += 6.28318530718f * static_cast<float>(hz) / sampleRate;
+            if (tonePhase >= 6.28318530718f) tonePhase -= 6.28318530718f;
+            return std::sin(tonePhase);
+        }
+        return x;
+    }
+};
+
+// A band-limited fill carries far less power than full-band white noise at the
+// same amplitude, so these modes get a makeup gain chosen (offline, by measuring
+// the filter RMS) to make the volume slider mean about the same loudness in
+// every mode. That keeps the low band no louder overall than the white noise a
+// user already runs, while putting ~26 dB more energy into the 60-100 Hz window
+// than white noise would. The peaks stay well under full scale at realistic
+// levels (the low band only starts to clip above roughly -7.5 dBFS).
+static float modeMakeupGain(int mode) {
+    switch (mode) {
+        case NoiseSpeechBand: return 2.7f;
+        case NoiseLowBand:    return 18.5f;
+        default:              return 1.0f;
+    }
+}
+
+// Peak sample the shaping stage produces for a full-scale input, per mode
+// (measured offline with the same filter coefficients). White and pink noise are
+// uniform and peak at the input amplitude; a tone peaks at 1.0.
+static float modePeakFactor(int mode) {
+    switch (mode) {
+        case NoiseSpeechBand: return 0.82f;
+        case NoiseLowBand:    return 0.14f;
+        default:              return 1.0f;
+    }
+}
+
+// Leave this much of full scale for the fill. A gated/limited output would be
+// audible as distortion, so the gain is capped well before 1.0.
+static constexpr float kOutputHeadroom = 0.7f;
+
+float noiseModeLevelCeiling(int mode) {
+    const float peaks = modePeakFactor(clampNoiseMode(mode)) * modeMakeupGain(clampNoiseMode(mode));
+    if (peaks <= 0.0f) return 1.0f;
+    const float ceiling = kOutputHeadroom / peaks;
+    return ceiling > 1.0f ? 1.0f : ceiling;
+}
+
 void KeepAlive::CallbackAccess::get_level(void *pDeviceVoid, float *outLevel) {
     if (!pDeviceVoid || !outLevel) return;
     auto *pDevice = static_cast<ma_device *>(pDeviceVoid);
@@ -210,12 +360,24 @@ void KeepAlive::CallbackAccess::get_noise_mode(void *pDeviceVoid, int *outMode) 
     if (!pDeviceVoid || !outMode) return;
     auto *pDevice = static_cast<ma_device *>(pDeviceVoid);
     auto *impl = static_cast<KeepAlive::Impl *>(pDevice->pUserData);
-    int mode = 0;
+    int mode = NoiseWhite;
     if (impl) {
         mode = impl->noiseMode.load(std::memory_order_relaxed);
     }
-    if (mode != 0 && mode != 1 && mode != 2) mode = 0;
-    *outMode = mode;
+    *outMode = clampNoiseMode(mode);
+}
+
+void KeepAlive::CallbackAccess::get_tone_hz(void *pDeviceVoid, int *outHz) {
+    if (!pDeviceVoid || !outHz) return;
+    auto *pDevice = static_cast<ma_device *>(pDeviceVoid);
+    auto *impl = static_cast<KeepAlive::Impl *>(pDevice->pUserData);
+    int hz = 1000;
+    if (impl) {
+        hz = impl->toneHz.load(std::memory_order_relaxed);
+    }
+    if (hz < 20) hz = 20;
+    if (hz > 15000) hz = 15000;
+    *outHz = hz;
 }
 
 bool KeepAlive::CallbackAccess::next_burst_emit(void *pDeviceVoid, unsigned sampleRate) {
@@ -285,8 +447,11 @@ static void data_callback(ma_device *pDevice, void *pOutput, const void * /*pInp
     if (level < 0.0f) level = 0.0f;
     if (level > 1.0f) level = 1.0f;
 
-    int mode = 0;
+    int mode = NoiseWhite;
     KeepAlive::CallbackAccess::get_noise_mode(pDevice, &mode);
+
+    int toneHz = 1000;
+    KeepAlive::CallbackAccess::get_tone_hz(pDevice, &toneHz);
 
     ma_uint32 channels = pDevice->playback.channels;
     if (channels == 0) channels = 2;
@@ -294,23 +459,41 @@ static void data_callback(ma_device *pDevice, void *pOutput, const void * /*pInp
     static thread_local std::uint32_t rng = static_cast<std::uint32_t>(
         std::chrono::steady_clock::now().time_since_epoch().count() ^ std::random_device{}());
     static thread_local PinkState pinkState;
+    static thread_local ShapingState shape;
+    static thread_local float smoothedGain = -1.0f;
 
     float *out = static_cast<float *>(pOutput);
     const float invMax = 2.0f / 4294967295.0f;
 
     const ma_uint32 sampleRate = pDevice->sampleRate > 0 ? pDevice->sampleRate : 44100;
 
+    if (shape.mode != mode || shape.sampleRate != static_cast<float>(sampleRate)) {
+        shape.configure(mode, static_cast<float>(sampleRate));
+    }
+
+    // Ease the applied gain towards its target (~20 ms) so dragging the volume
+    // slider or switching mode does not click. The gain is also capped so the
+    // output never reaches full scale, whatever level the user asks for.
+    float targetGain = level * modeMakeupGain(mode);
+    const float maxGain = kOutputHeadroom / modePeakFactor(mode);
+    if (targetGain > maxGain) targetGain = maxGain;
+    if (smoothedGain < 0.0f) smoothedGain = targetGain;
+    const float smoothAlpha =
+        1.0f - std::exp(-static_cast<float>(frameCount) / (0.02f * static_cast<float>(sampleRate)));
+    smoothedGain += (targetGain - smoothedGain) * smoothAlpha;
+    if (smoothedGain > maxGain) smoothedGain = maxGain;
+
     for (ma_uint32 f = 0; f < frameCount; ++f) {
         bool emitNoise = true;
-        if (mode == 2) {
+        if (mode == NoiseBurst) {
             emitNoise = KeepAlive::CallbackAccess::next_burst_emit(pDevice, sampleRate);
         }
 
         float val = 0.0f;
         if (emitNoise) {
             const float white = (static_cast<float>(static_cast<int32_t>(xorshift32(rng))) * invMax);
-            const float src = (mode == 1) ? generate_pink(white, pinkState) : white;
-            val = src * level;
+            const float src = (mode == NoisePink) ? generate_pink(white, pinkState) : white;
+            val = shape.process(src, mode, toneHz) * smoothedGain;
             if (val > 1.0f) val = 1.0f;
             if (val < -1.0f) val = -1.0f;
         } else {
@@ -388,11 +571,13 @@ bool KeepAlive::configure(const Settings &s) {
     m_impl->floorLevel.store(startLevel, std::memory_order_relaxed);
     m_impl->autoTune.store(s.autoTune, std::memory_order_relaxed);
     m_impl->maxLevel.store(s.maxLevel > 0.0f ? s.maxLevel : 0.02f, std::memory_order_relaxed);
-    int nm = s.noiseMode;
-    if (nm != 0 && nm != 1 && nm != 2) nm = 0;
-    m_impl->noiseMode.store(nm, std::memory_order_relaxed);
+    m_impl->noiseMode.store(clampNoiseMode(s.noiseMode), std::memory_order_relaxed);
     m_impl->burstDurationMs.store(s.burstDurationMs > 0 ? s.burstDurationMs : 200, std::memory_order_relaxed);
     m_impl->burstIntervalMs.store(s.burstIntervalMs > 0 ? s.burstIntervalMs : 2000, std::memory_order_relaxed);
+    int hz = s.toneHz;
+    if (hz < 20) hz = 20;
+    if (hz > 15000) hz = 15000;
+    m_impl->toneHz.store(hz, std::memory_order_relaxed);
     m_impl->burstSampleCounter.store(0, std::memory_order_relaxed);
     m_impl->dropouts.store(0, std::memory_order_relaxed);
     m_impl->lastDropoutTime = std::chrono::steady_clock::now();
@@ -434,7 +619,11 @@ bool KeepAlive::configureImpl(const Settings &s) {
     {
         std::ostringstream ss;
         ss << "configure: requested device=" << (pChosen ? std::to_string(s.deviceIndex) : std::string("default"))
-           << " level=" << s.level;
+           << " level=" << s.level
+           << " noise=" << noiseModeName(clampNoiseMode(s.noiseMode));
+        if (clampNoiseMode(s.noiseMode) == NoiseTone) {
+            ss << " toneHz=" << s.toneHz;
+        }
         ws_diag_log(ss.str());
     }
 
@@ -534,6 +723,10 @@ void KeepAlive::verifyAndRestart() {
 float autoTuneNextLevel(float level, float base, float max,
                         unsigned dropouts, double stableSec, double stableThreshold) {
     static constexpr float kUpStep   = 1.5f;
+    // Only reached when the level sits above the learned floor. Raising the level
+    // sets the floor to the raised value too, so in practice the floor is what
+    // keeps the tuner honest; the user can always pull it back down by using the
+    // volume slider or "Quieter -3 dB", both of which reset the floor.
     static constexpr float kDownStep = 0.97f;
     static constexpr float kEps      = 1e-4f;
     if (level < 0.0f) level = 0.0f;
@@ -552,21 +745,6 @@ float autoTuneNextLevel(float level, float base, float max,
     return level;
 }
 
-static constexpr float kInverseVolumeFactor = 0.7f;
-
-inline float amplitudeToDb(float amplitude) {
-    if (amplitude <= 0.0f) return -80.0f;
-    float db = 20.0f * std::log10(amplitude);
-    if (db < -80.0f) db = -80.0f;
-    if (db > 0.0f) db = 0.0f;
-    return db;
-}
-
-inline float dbToAmplitude(float db) {
-    if (db <= -80.0f) return 0.0f;
-    return std::pow(10.0f, db / 20.0f);
-}
-
 void KeepAlive::autoTuneStep() {
     if (!m_impl) return;
     std::lock_guard<std::mutex> lk(m_impl->opMtx);
@@ -579,11 +757,20 @@ void KeepAlive::autoTuneStep() {
     }
 
     static constexpr double kStableSecs = 20.0;
+    // A raise caused by a single drop-out is held for a while, then the floor
+    // eases back towards the level the user set, so the fill does not stay loud
+    // forever. It never relaxes below that level.
+    static constexpr double kRelaxSecs  = 90.0;
+    static constexpr float  kFloorRelax = 0.998f; // ~1 dB per minute
 
     const auto now = std::chrono::steady_clock::now();
     const unsigned n = m_impl->dropouts.exchange(0, std::memory_order_relaxed);
     const float base = m_impl->baseLevel.load(std::memory_order_relaxed);
-    const float maxL = m_impl->maxLevel.load(std::memory_order_relaxed);
+    // The auto-tuner may never push the output into the limiter, whatever the
+    // configured ceiling says.
+    float maxL = m_impl->maxLevel.load(std::memory_order_relaxed);
+    const float modeCeiling = noiseModeLevelCeiling(m_impl->noiseMode.load(std::memory_order_relaxed));
+    if (maxL > modeCeiling) maxL = modeCeiling;
     const float cur  = m_level.load(std::memory_order_relaxed);
     float floorL = m_impl->floorLevel.load(std::memory_order_relaxed);
     if (floorL < base) floorL = base;
@@ -591,34 +778,36 @@ void KeepAlive::autoTuneStep() {
 
     if (n > 0) m_impl->lastDropoutTime = now;
 
-    const float next = autoTuneNextLevel(cur, floorL, maxL, n, stable, kStableSecs);
-
-    float curDb = amplitudeToDb(cur);
-    float inverseTargetDb = -40.0f - curDb;
-    inverseTargetDb *= kInverseVolumeFactor;
-    if (inverseTargetDb < -80.0f) inverseTargetDb = -80.0f;
-    if (inverseTargetDb > 0.0f) inverseTargetDb = 0.0f;
-    float inverseTarget = dbToAmplitude(inverseTargetDb);
-
-    float finalNext = next;
-    if (inverseTarget < finalNext) {
-        finalNext = inverseTarget;
-    }
-
-    if (n > 0 && finalNext > floorL) {
-        m_impl->floorLevel.store(finalNext, std::memory_order_relaxed);
-    }
-    if (std::fabs(finalNext - cur) > 1e-4f) {
-        m_level.store(finalNext, std::memory_order_relaxed);
-        std::ostringstream ss;
-        if (n > 0) {
-            ss << "autotune: " << n << " drop-out(s) -> level " << cur << " -> " << finalNext
-               << " (invtarget=" << inverseTargetDb << "dBFS)";
-        } else {
-            ss << "autotune: stable -> level " << cur << " -> " << finalNext
-               << " (invtarget=" << inverseTargetDb << "dBFS)";
+    if (n > 0) {
+        // The level that survived the drop-out is the new floor...
+        const float raised = autoTuneNextLevel(cur, floorL, maxL, n, stable, kStableSecs);
+        if (raised > floorL) {
+            floorL = raised;
+            m_impl->floorLevel.store(raised, std::memory_order_relaxed);
         }
-        ws_diag_log(ss.str());
+    } else if (stable >= kRelaxSecs && floorL > base + 1e-4f) {
+        // ...but only while it is needed: with no further trouble the floor eases
+        // back down towards the level the user set.
+        float relaxed = floorL * kFloorRelax;
+        if (relaxed < base) relaxed = base;
+        floorL = relaxed;
+        m_impl->floorLevel.store(relaxed, std::memory_order_relaxed);
+    }
+
+    const float next = autoTuneNextLevel(cur, floorL, maxL, n, stable, kStableSecs);
+    if (std::fabs(next - cur) > 1e-4f) {
+        m_level.store(next, std::memory_order_relaxed);
+        const bool settling = (n == 0);
+        if (!settling || (now - m_impl->lastSettleLog) > std::chrono::seconds(30)) {
+            if (settling) m_impl->lastSettleLog = now;
+            std::ostringstream ss;
+            if (!settling) {
+                ss << "autotune: " << n << " drop-out(s) -> level " << cur << " -> " << next;
+            } else {
+                ss << "autotune: settling -> level " << cur << " -> " << next;
+            }
+            ws_diag_log(ss.str());
+        }
     }
 }
 
@@ -687,8 +876,14 @@ bool KeepAlive::autoTuneEnabled() const {
 
 void KeepAlive::setNoiseMode(int mode) {
     if (!m_impl) return;
-    if (mode != 0 && mode != 1 && mode != 2) mode = 0;
-    m_impl->noiseMode.store(mode, std::memory_order_relaxed);
+    m_impl->noiseMode.store(clampNoiseMode(mode), std::memory_order_relaxed);
+}
+
+void KeepAlive::setToneHz(int hz) {
+    if (!m_impl) return;
+    if (hz < 20) hz = 20;
+    if (hz > 15000) hz = 15000;
+    m_impl->toneHz.store(hz, std::memory_order_relaxed);
 }
 
 void KeepAlive::setBurstDuration(int ms) {
@@ -715,8 +910,12 @@ int KeepAlive::burstIntervalMs() const {
     return m_impl ? m_impl->burstIntervalMs.load(std::memory_order_relaxed) : 2000;
 }
 
+int KeepAlive::toneHz() const {
+    return m_impl ? m_impl->toneHz.load(std::memory_order_relaxed) : 1000;
+}
+
 int KeepAlive::noiseMode() const {
-    return m_impl ? m_impl->noiseMode.load(std::memory_order_relaxed) : 0;
+    return m_impl ? m_impl->noiseMode.load(std::memory_order_relaxed) : NoiseWhite;
 }
 
 float KeepAlive::effectiveLevel() const {
