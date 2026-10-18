@@ -260,6 +260,13 @@ if(WIN32)
     # can show it in Explorer, the tray and the file properties dialog.
     enable_language(RC)
     target_sources(white-sound PRIVATE assets/white_sound.rc)
+    # windres does not report the headers it reads, so CMake would not know the
+    # resource depends on the generated version header. Without this, bumping the
+    # version and rebuilding in an existing build tree leaves the old number in the
+    # executable's VERSIONINFO (the installer and the About dialog disagree with
+    # it). A fresh build, like the CI's, gets it right either way.
+    set_property(SOURCE assets/white_sound.rc APPEND PROPERTY
+        OBJECT_DEPENDS ${WS_GENERATED_DIR}/ws_version.h)
     target_include_directories(white-sound PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/third_party
         # windres resolves white_sound.ico through the include path.
