@@ -230,9 +230,10 @@ tray.
   global hotkey yet.
 - **Windows taskbar button**: while the app runs it also shows a single
   "White Sound" button on the taskbar, with its own icon. Clicking it toggles
-  the panel (the panel still auto-hides when it loses focus). Closing the panel
-  removes the button so the app lives only in the tray; reopening the panel from
-  the tray brings it back
+  the panel (the panel still auto-hides when it loses focus), and **–** leaves the
+  button in place. **✕** is what takes the button away, as described under the
+  window buttons above: it does not come back until the next launch, not even
+  when the panel is opened again from the tray
 
 Changes made from the flyout are applied live and saved automatically.
 
